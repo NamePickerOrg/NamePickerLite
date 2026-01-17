@@ -4,20 +4,33 @@
   },
   "groups" : [
     {
+      "hidden" : false,
       "layers" : [
         {
-          "glass" : true,
-          "image-name" : "Group 1.svg",
-          "name" : "Group 1",
+          "hidden" : false,
+          "image-name" : "Group 3.svg",
+          "name" : "topDice",
           "position" : {
-            "scale" : 2,
+            "scale" : 1.85,
             "translation-in-points" : [
-              -5.419876428144335,
-              -5.487626428144381
+              -94.27500000000015,
+              -86.75
+            ]
+          }
+        },
+        {
+          "image-name" : "Group 4.svg",
+          "name" : "bottomDice",
+          "position" : {
+            "scale" : 1.85,
+            "translation-in-points" : [
+              113.05818327036854,
+              90.21174999999994
             ]
           }
         }
       ],
+      "name" : "mainIcon",
       "shadow" : {
         "kind" : "neutral",
         "opacity" : 0.5
