@@ -2,6 +2,7 @@ import 'main.dart';
 import 'package:flutter/material.dart';
 import 'student.dart';
 import 'student_db.dart';
+import 'dart:convert';
 import 'dart:io';
 import 'package:file_picker/file_picker.dart';
 import 'package:path_provider/path_provider.dart';
@@ -146,9 +147,14 @@ class _StudentEditorPageState extends State<StudentEditorPage> {
       type: FileType.custom,
       allowedExtensions: ['csv'],
     );
-    if (result != null && result.files.single.path != null) {
-      final file = File(result.files.single.path!);
-      final content = await file.readAsString();
+    if (result != null && (kIsWeb || result.files.single.path != null)) {
+      String content;
+      if (kIsWeb) {
+        content = utf8.decode(result.files.single.bytes!);
+      } else {
+        final file = File(result.files.single.path!);
+        content = await file.readAsString();
+      }
       final error = await _importCsv(content);
       if (error != null) {
         showDialog(

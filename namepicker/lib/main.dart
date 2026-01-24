@@ -1,6 +1,7 @@
 // ignore_for_file: prefer_const_constructors, prefer_const_literals_to_create_immutables
 import 'dart:io' show Platform;
 import 'dart:math';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:sprintf/sprintf.dart';
@@ -26,7 +27,7 @@ final codename = "SilverWolf";
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   // 桌面平台初始化 sqflite_ffi 和 window_manager
-  if (Platform.isWindows || Platform.isLinux || Platform.isMacOS) {
+  if (!kIsWeb && (Platform.isWindows || Platform.isLinux || Platform.isMacOS)) {
     sqfliteFfiInit();
     databaseFactory = databaseFactoryFfi;
     await windowManager.ensureInitialized();
@@ -283,7 +284,8 @@ class _MyHomePageState extends State<MyHomePage> {
     return Scaffold(
       body: Column(
         children: [
-          if (!Platform.isAndroid & !Platform.isIOS) CustomTitleBar(),
+          if (!kIsWeb && !Platform.isAndroid && !Platform.isIOS)
+            CustomTitleBar(),
           Expanded(
             child: LayoutBuilder(
               builder: (context, constraints) {
@@ -417,7 +419,7 @@ class CustomTitleBar extends StatelessWidget {
         ),
         child: Row(
           children: [
-            SizedBox(width: Platform.isMacOS ? 76 : 12),
+            SizedBox(width: (!kIsWeb && Platform.isMacOS) ? 76 : 12),
             ClipRRect(
               borderRadius: BorderRadius.circular(6),
               child: Image.asset(
@@ -440,7 +442,7 @@ class CustomTitleBar extends StatelessWidget {
             SizedBox(width: 8),
             Container(width: 1, height: 20, color: colorScheme.outlineVariant),
             Spacer(),
-            if (!Platform.isMacOS) ...[
+            if (!kIsWeb && !Platform.isMacOS) ...[
               _TitleBarButton(
                 icon: Icons.minimize,
                 tooltip: '最小化',
