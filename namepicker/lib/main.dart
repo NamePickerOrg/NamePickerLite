@@ -5,7 +5,6 @@ import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:sprintf/sprintf.dart';
-import 'settings_card.dart';
 import 'student_editor.dart';
 // 仅桌面平台需要 sqflite_common_ffi
 import 'package:sqflite_common_ffi/sqflite_ffi.dart'
@@ -145,6 +144,13 @@ class MyAppState extends ChangeNotifier {
   var current = "别紧张...";
   var history = <String>[];
 
+  void reset() {
+    current = "别紧张...";
+    history.clear();
+    pickedIds.clear();
+    notifyListeners();
+  }
+
   GlobalKey? historyListKey;
 
   // 0: 跟随系统 1: 亮色 2: 暗色
@@ -273,7 +279,7 @@ class _MyHomePageState extends State<MyHomePage> {
     // The container for the current page, with its background color
     // and subtle switching animation.
     var mainArea = ColoredBox(
-      color: colorScheme.surfaceContainerHighest,
+      color: colorScheme.surface,
       child: PageView(
         controller: _pageController,
         physics: const NeverScrollableScrollPhysics(),
@@ -293,7 +299,12 @@ class _MyHomePageState extends State<MyHomePage> {
                   final colorScheme = Theme.of(context).colorScheme;
                   return Column(
                     children: [
-                      Expanded(child: mainArea),
+                      Expanded(
+                        child: SafeArea(
+                          bottom: false,
+                          child: mainArea,
+                        ),
+                      ),
                       Material(
                         color: colorScheme.surface,
                         child: BottomNavigationBar(
@@ -341,7 +352,8 @@ class _MyHomePageState extends State<MyHomePage> {
                     children: [
                       SafeArea(
                         child: NavigationRail(
-                          extended: constraints.maxWidth >= 600,
+                          extended: false,
+                          labelType: NavigationRailLabelType.all,
                           destinations: [
                             NavigationRailDestination(
                               icon: Icon(Icons.home),
@@ -373,7 +385,12 @@ class _MyHomePageState extends State<MyHomePage> {
                           },
                         ),
                       ),
-                      Expanded(child: mainArea),
+                      Expanded(
+                        child: SafeArea(
+                          bottom: false,
+                          child: mainArea,
+                        ),
+                      ),
                     ],
                   );
                 }
@@ -534,254 +551,309 @@ class _GeneratorPageState extends State<GeneratorPage> {
   @override
   Widget build(BuildContext context) {
     var appState = context.watch<MyAppState>();
-    final resultList = appState.history.take(_pickCount).toList();
+    var colorScheme = Theme.of(context).colorScheme;
+
     return Center(
       child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
-        child: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              SizedBox(height: 30),
-              // 名单选择
-              // 抽选结果列表（修复overflow，限制最大高度并可滚动）
-              Card(
-                color: Theme.of(context).colorScheme.surfaceContainerHighest,
-                elevation: 0,
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(16),
-                ),
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 18,
-                    vertical: 12,
-                  ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
-                        children: [
-                          Icon(
-                            Icons.list_alt_outlined,
-                            color: Theme.of(context).colorScheme.primary,
-                          ),
-                          SizedBox(width: 8),
-                          Text(
-                            '抽选结果',
-                            style: TextStyle(fontWeight: FontWeight.w600),
-                          ),
-                        ],
-                      ),
-                      SizedBox(height: 10),
-                      if (resultList.isEmpty)
-                        Text(
-                          '暂无抽选结果',
-                          style: TextStyle(
-                            color: Theme.of(
-                              context,
-                            ).colorScheme.onSurfaceVariant,
-                          ),
-                        ),
-                      if (resultList.isNotEmpty)
-                        SizedBox(
-                          // 限制最大高度，超出可滚动
-                          height: 160,
-                          child: ListView.separated(
-                            itemCount: resultList.length,
-                            separatorBuilder: (_, __) => Divider(height: 1),
-                            itemBuilder: (context, idx) {
-                              return ListTile(
-                                leading: CircleAvatar(
-                                  backgroundColor: Theme.of(
-                                    context,
-                                  ).colorScheme.primaryContainer,
-                                  child: Text(
-                                    '${idx + 1}',
-                                    style: TextStyle(
-                                      color: Theme.of(
-                                        context,
-                                      ).colorScheme.primary,
-                                    ),
-                                  ),
-                                ),
-                                title: Text(
-                                  resultList[idx],
-                                  style: TextStyle(fontWeight: FontWeight.w500),
-                                ),
-                              );
-                            },
-                          ),
-                        ),
-                    ],
-                  ),
-                ),
-              ),
-              SizedBox(height: 12),
-              Card(
-                color: Theme.of(context).colorScheme.surfaceContainerHighest,
-                elevation: 0,
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(16),
-                ),
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 18,
-                    vertical: 10,
-                  ),
-                  child: Row(
-                    children: [
-                      Icon(
-                        Icons.list,
-                        color: Theme.of(context).colorScheme.primary,
-                      ),
-                      SizedBox(width: 8),
-                      Text('抽选名单：'),
-                      DropdownButton<int>(
-                        value: appState.currentListId,
-                        items: appState.lists
-                            .map(
-                              (l) => DropdownMenuItem(
-                                value: l.id,
-                                child: Text(l.name),
-                              ),
-                            )
-                            .toList(),
-                        onChanged: (id) {
-                          appState.setCurrentListId(id);
-                        },
-                      ),
-                      IconButton(
-                        onPressed: appState._initLists, 
-                        icon: Icon(Icons.replay),
-                        tooltip: "刷新名单列表",
-                      )
-                    ],
-                  ),
-                ),
-              ),
-              SizedBox(height: 10),
-              Card(
-                color: Theme.of(context).colorScheme.surfaceContainerHighest,
-                elevation: 0,
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(16),
-                ),
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 18,
-                    vertical: 16,
-                  ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
-                        children: [
-                          Icon(
-                            Icons.filter_alt_outlined,
-                            color: Theme.of(context).colorScheme.primary,
-                          ),
-                          SizedBox(width: 8),
-                          Text(
-                            '筛选条件',
-                            style: TextStyle(fontWeight: FontWeight.w600),
-                          ),
-                        ],
-                      ),
-                      SizedBox(height: 10),
-                      Row(
-                        children: [
-                          Text('性别：'),
-                          DropdownButton<String>(
-                            value: appState.filterGender,
-                            items: ['全部', '男', '女']
-                                .map(
-                                  (g) => DropdownMenuItem(
-                                    value: g,
-                                    child: Text(g),
-                                  ),
-                                )
-                                .toList(),
-                            onChanged: (v) => appState.setFilterGender(v!),
-                          ),
-                          SizedBox(width: 20),
-                          Text('学号类型：'),
-                          DropdownButton<String>(
-                            value: appState.filterNumberType,
-                            items: ['全部', '单号', '双号']
-                                .map(
-                                  (t) => DropdownMenuItem(
-                                    value: t,
-                                    child: Text(t),
-                                  ),
-                                )
-                                .toList(),
-                            onChanged: (v) => appState.setFilterNumberType(v!),
-                          ),
-                        ],
-                      ),
-                      SizedBox(height: 10),
-                      Row(
-                        // spacing: 10, // Row 没有 spacing 属性，移除
-                        children: [
-                          Text("抽选人数:"),
-                          IconButton(
-                            onPressed: () {
-                              if (_pickCount <= 1) {
-                                setState(() {
-                                  _pickCount = 1;
-                                });
-                              } else {
-                                setState(() {
-                                  _pickCount -= 1;
-                                });
-                              }
-                            },
-                            icon: Icon(Icons.remove),
-                          ),
-                          Text(_pickCount.toString()),
-                          IconButton(
-                            onPressed: () {
-                              setState(() {
-                                _pickCount += 1;
-                              });
-                            },
-                            icon: Icon(Icons.add),
-                          ),
-                        ],
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-              SizedBox(height: 18),
-              Row(
-                mainAxisSize: MainAxisSize.min,
+        padding: const EdgeInsets.all(16.0),
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            final isWide = constraints.maxWidth >= 600;
+            final displayCard = _buildDisplayCard(appState, colorScheme, isWide: isWide);
+            final optionsCard = _buildOptionsCard(appState, colorScheme);
+
+            if (isWide) {
+              return Row(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  ElevatedButton.icon(
-                    icon: Icon(Icons.casino_outlined),
-                    onPressed: () async {
-                      int count = _pickCount;
-                      for (int i = 0; i < count; i++) {
-                        await appState.getNextStudent();
-                      }
-                    },
-                    label: Text('抽选'),
-                    style: ElevatedButton.styleFrom(
-                      padding: EdgeInsets.symmetric(
-                        horizontal: 32,
-                        vertical: 16,
+                  Expanded(flex: 5, child: displayCard),
+                  const SizedBox(width: 16),
+                  Expanded(flex: 4, child: optionsCard),
+                ],
+              );
+            } else {
+              return SingleChildScrollView(
+                child: Column(
+                  children: [
+                    displayCard,
+                    const SizedBox(height: 16),
+                    optionsCard,
+                  ],
+                ),
+              );
+            }
+          },
+        ),
+      ),
+    );
+  }
+
+  Widget _buildDisplayCard(MyAppState appState, ColorScheme colorScheme, {required bool isWide}) {
+    final theme = Theme.of(context);
+    final currentText = appState.current;
+    final isDefault = currentText == "别紧张...";
+    final isWarning = currentText == "无符合条件学生" || currentText == "请先选择名单";
+
+    Color textColor;
+    FontWeight fontWeight;
+    if (isDefault) {
+      textColor = colorScheme.onSurfaceVariant.withValues(alpha: 0.4);
+      fontWeight = FontWeight.w300;
+    } else if (isWarning) {
+      textColor = colorScheme.error;
+      fontWeight = FontWeight.w500;
+    } else {
+      textColor = colorScheme.primary;
+      fontWeight = FontWeight.w700;
+    }
+
+    final recentHistory = appState.history.take(5).toList();
+
+    final mainResult = Center(
+      child: AnimatedSize(
+        duration: const Duration(milliseconds: 250),
+        curve: Curves.easeInOut,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          child: Text(
+            currentText,
+            textAlign: TextAlign.center,
+            style: theme.textTheme.displayLarge?.copyWith(
+              color: textColor,
+              fontWeight: fontWeight,
+              fontFamily: "HarmonyOS_Sans_SC",
+            ),
+          ),
+        ),
+      ),
+    );
+
+    return Card(
+      elevation: 0,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(18),
+        side: BorderSide(color: colorScheme.outlineVariant, width: 1),
+      ),
+      color: colorScheme.surface,
+      child: Padding(
+        padding: const EdgeInsets.all(20),
+        child: Column(
+          children: [
+            Row(
+              children: [
+                const SizedBox(width: 48),
+                Expanded(
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Icon(Icons.person_outline, color: colorScheme.primary, size: 20),
+                      const SizedBox(width: 6),
+                      Text(
+                        '抽选结果',
+                        style: theme.textTheme.titleMedium?.copyWith(
+                          fontWeight: FontWeight.w600,
+                          color: colorScheme.onSurface,
+                        ),
                       ),
-                      textStyle: TextStyle(
-                        fontSize: 18,
-                        fontWeight: FontWeight.w600,
+                    ],
+                  ),
+                ),
+                IconButton(
+                  onPressed: () => appState.reset(),
+                  icon: Icon(Icons.restart_alt),
+                  tooltip: '重置',
+                  color: colorScheme.onSurfaceVariant,
+                ),
+              ],
+            ),
+            const SizedBox(height: 20),
+            if (isWide) Expanded(child: mainResult) else SizedBox(height: 180, child: mainResult),
+            if (recentHistory.isNotEmpty) ...[
+              const SizedBox(height: 12),
+              Divider(color: colorScheme.outlineVariant.withValues(alpha: 0.5)),
+              const SizedBox(height: 8),
+              SizedBox(
+                height: 120,
+                child: ListView.separated(
+                  itemCount: recentHistory.length,
+                  separatorBuilder: (_, __) =>
+                      Divider(height: 1, color: colorScheme.outlineVariant.withValues(alpha: 0.3)),
+                  itemBuilder: (context, idx) {
+                    return Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 4),
+                      child: Row(
+                        children: [
+                          CircleAvatar(
+                            radius: 12,
+                            backgroundColor: colorScheme.primaryContainer,
+                            child: Text(
+                              '${idx + 1}',
+                              style: TextStyle(
+                                fontSize: 11,
+                                color: colorScheme.primary,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: Text(
+                              recentHistory[idx],
+                              style: theme.textTheme.bodyMedium?.copyWith(
+                                color: colorScheme.onSurfaceVariant,
+                              ),
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                        ],
                       ),
-                    ),
+                    );
+                  },
+                ),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildOptionsCard(MyAppState appState, ColorScheme colorScheme) {
+    final theme = Theme.of(context);
+
+    return Card(
+      elevation: 0,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(18),
+        side: BorderSide(color: colorScheme.outlineVariant, width: 1),
+      ),
+      color: colorScheme.surface,
+      child: Padding(
+        padding: const EdgeInsets.all(20),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Icon(Icons.tune, color: colorScheme.primary, size: 20),
+                const SizedBox(width: 6),
+                Text(
+                  '抽选选项',
+                  style: theme.textTheme.titleMedium?.copyWith(
+                    fontWeight: FontWeight.w600,
+                    color: colorScheme.onSurface,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 24),
+            // 名单选择
+            Row(
+              children: [
+                Icon(Icons.list, color: colorScheme.primary, size: 18),
+                const SizedBox(width: 8),
+                Text('名单：', style: theme.textTheme.bodyMedium),
+                Expanded(
+                  child: DropdownButton<int>(
+                    value: appState.currentListId,
+                    isExpanded: true,
+                    items: appState.lists
+                        .map((l) => DropdownMenuItem(value: l.id, child: Text(l.name)))
+                        .toList(),
+                    onChanged: (id) => appState.setCurrentListId(id),
+                  ),
+                ),
+                IconButton(
+                  onPressed: appState._initLists,
+                  icon: Icon(Icons.replay, size: 18),
+                  tooltip: '刷新名单列表',
+                  padding: EdgeInsets.zero,
+                  constraints: BoxConstraints(minWidth: 32, minHeight: 32),
+                ),
+              ],
+            ),
+            const SizedBox(height: 24),
+            // 筛选条件
+            Row(
+              children: [
+                Icon(Icons.filter_alt_outlined, color: colorScheme.primary, size: 18),
+                const SizedBox(width: 8),
+                Text('筛选条件', style: theme.textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.w500)),
+              ],
+            ),
+            const SizedBox(height: 12),
+            Padding(
+              padding: const EdgeInsets.only(left: 26),
+              child: Row(
+                children: [
+                  Text('性别：', style: theme.textTheme.bodySmall),
+                  DropdownButton<String>(
+                    value: appState.filterGender,
+                    items: ['全部', '男', '女']
+                        .map((g) => DropdownMenuItem(value: g, child: Text(g)))
+                        .toList(),
+                    onChanged: (v) => appState.setFilterGender(v!),
+                  ),
+                  const SizedBox(width: 12),
+                  Text('学号：', style: theme.textTheme.bodySmall),
+                  DropdownButton<String>(
+                    value: appState.filterNumberType,
+                    items: ['全部', '单号', '双号']
+                        .map((t) => DropdownMenuItem(value: t, child: Text(t)))
+                        .toList(),
+                    onChanged: (v) => appState.setFilterNumberType(v!),
                   ),
                 ],
               ),
-              SizedBox(height: 18),
-            ],
-          ),
+            ),
+            const SizedBox(height: 24),
+            // 抽选人数
+            Row(
+              children: [
+                Icon(Icons.numbers, color: colorScheme.primary, size: 18),
+                const SizedBox(width: 8),
+                Text('抽选人数：', style: theme.textTheme.bodyMedium),
+                const Spacer(),
+                IconButton(
+                  onPressed: _pickCount <= 1
+                      ? null
+                      : () => setState(() => _pickCount -= 1),
+                  icon: Icon(Icons.remove_circle_outline),
+                  color: colorScheme.primary,
+                ),
+                Text(
+                  '$_pickCount',
+                  style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w600),
+                ),
+                IconButton(
+                  onPressed: () => setState(() => _pickCount += 1),
+                  icon: Icon(Icons.add_circle_outline),
+                  color: colorScheme.primary,
+                ),
+              ],
+            ),
+            const SizedBox(height: 24),
+            // 抽选按钮
+            SizedBox(
+              width: double.infinity,
+              child: ElevatedButton.icon(
+                icon: const Icon(Icons.casino_outlined),
+                onPressed: () async {
+                  for (int i = 0; i < _pickCount; i++) {
+                    await appState.getNextStudent();
+                  }
+                },
+                label: const Text('抽选'),
+                style: ElevatedButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(vertical: 16),
+                  textStyle: const TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+            ),
+          ],
         ),
       ),
     );
@@ -830,8 +902,6 @@ class BigCard extends StatelessWidget {
 class NameListPage extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
-    var theme = Theme.of(context);
-    var appState = context.watch<MyAppState>();
     return StudentEditorPage();
   }
 }
@@ -841,25 +911,21 @@ class SettingsPage extends StatelessWidget {
   Widget build(BuildContext context) {
     var theme = Theme.of(context);
     var appState = context.watch<MyAppState>();
-    return Column(
-      spacing: 3,
+    return ListView(
       children: [
-        Container(
-          padding: const EdgeInsets.only(left: 20, top: 32, bottom: 12),
-          alignment: Alignment.centerLeft,
+        Padding(
+          padding: const EdgeInsets.fromLTRB(20, 32, 20, 12),
           child: Text(
             '设置',
             style: theme.textTheme.titleLarge?.copyWith(
               fontWeight: FontWeight.bold,
             ),
-            textAlign: TextAlign.left,
           ),
         ),
-        SizedBox(width: 10),
-        SettingsCard(
-          title: Text("主题模式"),
+        ListTile(
           leading: Icon(Icons.brightness_6_outlined),
-          description: "选择亮色、暗色或跟随系统主题",
+          title: Text("主题模式"),
+          subtitle: Text("选择亮色、暗色或跟随系统主题"),
           trailing: DropdownButton<int>(
             value: appState.themeMode,
             items: const [
@@ -872,10 +938,10 @@ class SettingsPage extends StatelessWidget {
             },
           ),
         ),
-        SettingsCard(
-          title: Text("允许重复抽取"),
+        ListTile(
           leading: Icon(Icons.repeat),
-          description: "关闭后，所有人都抽过才会重置名单",
+          title: Text("允许重复抽取"),
+          subtitle: Text("关闭后，所有人都抽过才会重置名单"),
           trailing: Switch(
             value: appState.allowRepeat,
             onChanged: (v) => appState.setAllowRepeat(v),
