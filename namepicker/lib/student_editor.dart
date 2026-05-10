@@ -501,6 +501,7 @@ class _StudentDialogState extends State<StudentDialog> {
               name: nameController.text,
               gender: gender,
               studentId: idController.text,
+              listId: widget.student?.listId,
             );
             Navigator.pop(context, s);
           },

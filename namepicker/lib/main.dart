@@ -69,6 +69,7 @@ class MyApp extends StatelessWidget {
               themeMode = ThemeMode.system;
           }
           return MaterialApp(
+            debugShowCheckedModeBanner: false,
             title: 'NamePicker',
             theme: ThemeData(
               useMaterial3: true,
