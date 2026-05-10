@@ -16,6 +16,8 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:window_manager/window_manager.dart'
     if (dart.library.io) 'package:window_manager/window_manager.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'package:flutter_svg/flutter_svg.dart';
+import 'contributors.dart';
 
 // BIN 1 1111 1111 1111 0000 0000 0000 = DEC 33550336
 // 众人将与一人离别，惟其人将觐见奇迹
@@ -953,128 +955,154 @@ class SettingsPage extends StatelessWidget {
   }
 }
 
-class AboutPage extends StatelessWidget {
+class AboutPage extends StatefulWidget {
+  @override
+  State<AboutPage> createState() => _AboutPageState();
+}
+
+class _AboutPageState extends State<AboutPage> {
+  bool _contributorsExpanded = false;
+
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
+    final theme = Theme.of(context);
+    final hasMore = contributors.length > 3;
+    final displayContributors =
+        _contributorsExpanded ? contributors : contributors.take(3).toList();
+
     return Center(
-      child: SingleChildScrollView(
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 24.0, vertical: 32.0),
-          child: Card(
-            elevation: 4,
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(24),
-            ),
-            color: colorScheme.surfaceContainer,
-            child: Padding(
-              padding: const EdgeInsets.all(32.0),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.center,
-                children: [
-                  ClipRRect(
-                    borderRadius: BorderRadius.circular(16),
-                    child: Image.asset(
-                      'assets/NamePicker.png',
-                      width: 120,
-                      height: 120,
-                    ),
-                  ),
-                  SizedBox(height: 24),
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Text(
-                        sprintf("NamePicker %s", [version]),
-                        style: TextStyle(
-                          fontFamily: "HarmonyOS_Sans_SC",
-                          fontSize: 22,
-                          fontWeight: FontWeight.bold,
-                          color: colorScheme.onSurface,
-                        ),
-                      ),
-                    ],
-                  ),
-                  SizedBox(height: 8),
-                  Text(
-                    'Codename $codename',
-                    style: TextStyle(
-                      fontFamily: "HarmonyOS_Sans_SC",
-                      fontSize: 15,
-                      color: colorScheme.onSurfaceVariant,
-                    ),
-                  ),
-                  SizedBox(height: 16),
-                  Divider(
-                    height: 32,
-                    thickness: 1,
-                    color: colorScheme.outlineVariant,
-                  ),
-                  Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 8.0),
-                    child: Text(
-                      "「这次能让我玩得开心点吗？」",
-                      textAlign: TextAlign.center,
-                      style: TextStyle(
-                        fontFamily: "HarmonyOS_Sans_SC",
-                        fontSize: 16,
-                        fontWeight: FontWeight.w400,
-                        color: colorScheme.primary,
-                      ),
-                    ),
-                  ),
-                  SizedBox(height: 24),
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      CircleAvatar(
-                        radius: 18,
-                        backgroundColor: colorScheme.primaryContainer,
-                        child: ClipRRect(
-                          borderRadius: BorderRadius.circular(18),
-                          child: Image.asset(
-                            'assets/avaters/lhgser.jpg',
-                            width: 60,
-                            height: 60,
-                          ),
-                        ),
-                      ),
-                      SizedBox(width: 10),
-                      Text(
-                        "开发者 灵魂歌手er",
-                        style: TextStyle(
-                          fontFamily: "HarmonyOS_Sans_SC",
-                          fontSize: 16,
-                          fontWeight: FontWeight.w500,
-                          color: colorScheme.onSurface,
-                        ),
-                      ),
-                    ],
-                  ),
-                  SizedBox(height: 12),
-                  ElevatedButton.icon(
-                    onPressed: () async {
-                      const url = 'https://github.com/NamePickerOrg/NamePicker';
-                      final uri = Uri.parse(url);
-                      if (await canLaunchUrl(uri)) {
-                        await launchUrl(uri);
-                      }
-                    },
-                    icon: Icon(Icons.open_in_new),
-                    label: Text("访问GitHub仓库"),
-                  ),
-                  SizedBox(height: 12),
-                  Text(
-                    "© 2025-2025 NamePickerOrg",
-                    style: TextStyle(
-                      fontSize: 13,
-                      color: colorScheme.onSurfaceVariant,
-                    ),
-                  ),
-                ],
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: SingleChildScrollView(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+            Center(
+              child: SvgPicture.asset(
+                'assets/NamePicker-64rad.svg',
+                width: 96,
+                height: 96,
               ),
             ),
+            const SizedBox(height: 16),
+            Text(
+              'NamePicker',
+              textAlign: TextAlign.center,
+              style: theme.textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              "$version · $codename",
+              textAlign: TextAlign.center,
+              style: theme.textTheme.bodyMedium?.copyWith(color: colorScheme.onSurfaceVariant),
+            ),
+            const SizedBox(height: 24),
+              Card(
+                elevation: 0,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(18),
+                  side: BorderSide(color: colorScheme.outlineVariant, width: 1),
+                ),
+                color: colorScheme.surface,
+                child: Padding(
+                  padding: const EdgeInsets.all(20),
+                  child: Column(
+                    children: [
+                      Row(
+                        children: [
+                          CircleAvatar(
+                            radius: 24,
+                            backgroundColor: colorScheme.primaryContainer,
+                            child: ClipRRect(
+                              borderRadius: BorderRadius.circular(24),
+                              child: Image.asset('assets/avaters/lhgser.jpg', width: 48, height: 48),
+                            ),
+                          ),
+                          const SizedBox(width: 16),
+                          Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text('灵魂歌手er', style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w600)),
+                              Text('开发者', style: theme.textTheme.bodySmall?.copyWith(color: colorScheme.onSurfaceVariant)),
+                            ],
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 16),
+                      Text(
+                        "「这次能让我玩得开心点吗？」",
+                        textAlign: TextAlign.center,
+                        style: theme.textTheme.bodyMedium?.copyWith(color: colorScheme.primary),
+                      ),
+                      const SizedBox(height: 16),
+                      SizedBox(
+                        width: double.infinity,
+                        child: OutlinedButton.icon(
+                          onPressed: () async {
+                            const url = 'https://github.com/NamePickerOrg/NamePicker';
+                            final uri = Uri.parse(url);
+                            if (await canLaunchUrl(uri)) {
+                              await launchUrl(uri);
+                            }
+                          },
+                          icon: Icon(Icons.open_in_new),
+                          label: Text('GitHub'),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              const SizedBox(height: 12),
+              Card(
+                elevation: 0,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(18),
+                  side: BorderSide(color: colorScheme.outlineVariant, width: 1),
+                ),
+                color: colorScheme.surface,
+                child: Padding(
+                  padding: const EdgeInsets.all(20),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text('贡献者', style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w600)),
+                      const SizedBox(height: 12),
+                      if (contributors.isEmpty)
+                        Text('暂无贡献者', style: theme.textTheme.bodyMedium?.copyWith(color: colorScheme.onSurfaceVariant))
+                      else ...[
+                        for (final c in displayContributors)
+                          Padding(
+                            padding: const EdgeInsets.symmetric(vertical: 6),
+                            child: Row(
+                              children: [
+                                Icon(Icons.person, size: 20, color: colorScheme.onSurfaceVariant),
+                                const SizedBox(width: 12),
+                                Text(c, style: theme.textTheme.bodyMedium),
+                              ],
+                            ),
+                          ),
+                        if (hasMore)
+                          Align(
+                            alignment: Alignment.centerLeft,
+                            child: TextButton(
+                              onPressed: () => setState(() => _contributorsExpanded = !_contributorsExpanded),
+                              child: Text(_contributorsExpanded ? '收起' : '展开全部 (${contributors.length})'),
+                            ),
+                          ),
+                      ],
+                    ],
+                  ),
+                ),
+              ),
+              const SizedBox(height: 24),
+              Text(
+                "© 2025-2026 NamePickerOrg",
+                textAlign: TextAlign.center,
+                style: theme.textTheme.bodySmall?.copyWith(color: colorScheme.onSurfaceVariant),
+              ),
+            ],
           ),
         ),
       ),

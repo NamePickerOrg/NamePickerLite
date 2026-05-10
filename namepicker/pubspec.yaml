@@ -24,6 +24,7 @@ dependencies:
   url_launcher: any
   path_provider: any
   share_plus: any
+  flutter_svg: ^2.0.10+1
 
 dev_dependencies:
   flutter_test:
