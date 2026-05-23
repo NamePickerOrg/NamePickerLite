@@ -73,8 +73,13 @@ A: 将该软件添加至杀毒软件的白名单/信任区中，本软件保证�
 
 A: Python 的运行效率不高，慢属于正常现象
 
-## 鸣谢
+## 鸣谢 ✨
 
-- 感谢 [@undefftr](https://github.com/undefftr) 为图标设计提供支持
+感谢以下贡献者（[emoji key](https://allcontributors.org/docs/en/emoji-key)）：
 
-- 感谢 [@ShihaoShen2025](https://github.com/ShihaoShen2025) 试图修改 .gitignore 获得贡献者身份
+<!-- ALL-CONTRIBUTORS-LIST:START - Do not remove or modify this section -->
+<!-- prettier-ignore-start -->
+<!-- markdownlint-disable -->
+<!-- markdownlint-restore -->
+<!-- prettier-ignore-end -->
+<!-- ALL-CONTRIBUTORS-LIST:END -->
