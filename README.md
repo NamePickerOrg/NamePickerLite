@@ -1,5 +1,5 @@
 <div align="center">
-<img src="namepicker/assets/NamePicker.png" alt="icon" width="18%">
+<img src="namepicker/assets/NamePicker-64rad.png" alt="icon" width="18%">
 <h1>NamePicker</h1>
 <h3>一款简洁的点名软件</h3>
 </div>
