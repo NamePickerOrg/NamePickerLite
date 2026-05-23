@@ -102,7 +102,7 @@ Future<void> _showSingleQrDialog(
                   Icon(Icons.qr_code_2, size: 28),
                   SizedBox(width: 8),
                   Text(
-                    'QR码导出',
+                    'QR 码导出',
                     style: TextStyle(fontSize: 20, fontWeight: FontWeight.w600),
                   ),
                 ],
@@ -196,7 +196,7 @@ class _MultiQrDialogState extends State<_MultiQrDialog> {
                 SizedBox(width: 8),
                 Expanded(
                   child: Text(
-                    'QR码导出（第 ${_page + 1}/$total 张）',
+                    'QR 码导出（第 ${_page + 1}/$total 张）',
                     style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600),
                   ),
                 ),
@@ -295,7 +295,7 @@ class _QrScannerPageState extends State<_QrScannerPage> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: Text(widget.title ?? 'QR码导入'),
+        title: Text(widget.title ?? 'QR 码导入'),
         leading: IconButton(
           icon: Icon(Icons.close),
           onPressed: () => Navigator.pop(context),

@@ -103,7 +103,7 @@ class _StudentEditorPageState extends State<StudentEditorPage> {
     if (kIsWeb) {
       ScaffoldMessenger.of(
         context,
-      ).showSnackBar(SnackBar(content: Text('Web端暂不支持导出')));
+      ).showSnackBar(SnackBar(content: Text('Web 端暂不支持导出')));
       return;
     }
     final now = DateTime.now();
@@ -141,7 +141,7 @@ class _StudentEditorPageState extends State<StudentEditorPage> {
       String? outputPath;
       try {
         outputPath = await FilePicker.platform.saveFile(
-          dialogTitle: '导出名单为CSV',
+          dialogTitle: '导出名单为 CSV',
           fileName: filename,
           type: FileType.custom,
           allowedExtensions: ['csv'],
@@ -213,7 +213,7 @@ class _StudentEditorPageState extends State<StudentEditorPage> {
       while (true) {
         final next = await showQrScanner(
           context,
-          title: 'QR码导入 (${expected + 1}/$total)',
+          title: 'QR 码导入 (${expected + 1}/$total)',
         );
         if (next == null) return;
 
@@ -316,7 +316,7 @@ class _StudentEditorPageState extends State<StudentEditorPage> {
 
   Future<void> _importCsvDialog() async {
     FilePickerResult? result = await FilePicker.platform.pickFiles(
-      dialogTitle: "选择早期NamePicker版本的名单文件",
+      dialogTitle: "选择早期 NamePicker 版本的名单文件",
       type: FileType.custom,
       allowedExtensions: ['csv'],
     );
@@ -605,12 +605,12 @@ class _StudentEditorPageState extends State<StudentEditorPage> {
                   ),
                   ListTile(
                     leading: Icon(Icons.qr_code_scanner),
-                    title: Text('QR码导入'),
+                    title: Text('QR 码导入'),
                     onTap: () => Navigator.of(ctx).pop('qr_import'),
                   ),
                   ListTile(
                     leading: Icon(Icons.qr_code_2),
-                    title: Text('QR码导出'),
+                    title: Text('QR 码导出'),
                     onTap: () => Navigator.of(ctx).pop('qr_export'),
                   ),
                 ],
