@@ -14,7 +14,9 @@
       "avatar_url": "https://avatars.githubusercontent.com/u/92249708?v=4",
       "profile": "https://github.com/LHGS-github",
       "contributions": [
-        "code"
+        "code",
+        "maintenance",
+        "design"
       ]
     }
   ]
