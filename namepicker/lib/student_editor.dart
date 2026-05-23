@@ -117,7 +117,19 @@ class _StudentEditorPageState extends State<StudentEditorPage> {
         final directory = await getTemporaryDirectory();
         final file = File('${directory.path}/$filename');
         await file.writeAsString(buffer.toString(), flush: true);
-        await Share.shareXFiles([XFile(file.path)]);
+
+        final renderBox = context.findRenderObject() as RenderBox;
+        final sharePositionOrigin = Rect.fromLTWH(
+          0,
+          0,
+          renderBox.size.width,
+          renderBox.size.height,
+        );
+
+        await Share.shareXFiles(
+          [XFile(file.path)],
+          sharePositionOrigin: sharePositionOrigin,
+        );
       }
     } else {
       String? outputPath;
@@ -382,16 +394,19 @@ class _StudentEditorPageState extends State<StudentEditorPage> {
                 itemBuilder: (context, index) {
                   final s = students[index];
                   return ListTile(
+                    contentPadding: const EdgeInsets.symmetric(horizontal: 16),
                     title: Text(s.name),
                     subtitle: Text('学号: ${s.studentId} | 性别: ${s.gender}'),
                     trailing: Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
                         IconButton(
+                          visualDensity: VisualDensity.compact,
                           icon: Icon(Icons.edit),
                           onPressed: () => _addOrEditStudent(s),
                         ),
                         IconButton(
+                          visualDensity: VisualDensity.compact,
                           icon: Icon(Icons.delete),
                           onPressed: () => _deleteStudent(s),
                         ),
