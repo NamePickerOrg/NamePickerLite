@@ -9,6 +9,7 @@ import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:provider/provider.dart';
+import 'qr_transfer.dart';
 
 class StudentEditorPage extends StatefulWidget {
   const StudentEditorPage({Key? key}) : super(key: key);
@@ -87,13 +88,18 @@ class _StudentEditorPageState extends State<StudentEditorPage> {
     }
   }
 
-  Future<void> _exportCsvDialog() async {
+  String _generateCsv() {
     final buffer = StringBuffer();
     buffer.writeln('name,sex,no');
     for (final s in students) {
       final sexRaw = s.gender == '女' ? '1' : '0';
       buffer.writeln('${s.name},${sexRaw},${s.studentId}');
     }
+    return buffer.toString();
+  }
+
+  Future<void> _exportCsvDialog() async {
+    final csv = _generateCsv();
     if (kIsWeb) {
       ScaffoldMessenger.of(
         context,
@@ -109,14 +115,14 @@ class _StudentEditorPageState extends State<StudentEditorPage> {
       if (Platform.isAndroid) {
         final dir = '/storage/emulated/0/Download';
         final file = File('$dir/$filename');
-        await file.writeAsString(buffer.toString(), flush: true);
+        await file.writeAsString(csv, flush: true);
         ScaffoldMessenger.of(
           context,
         ).showSnackBar(SnackBar(content: Text('导出完成: $dir/$filename')));
       } else {
         final directory = await getTemporaryDirectory();
         final file = File('${directory.path}/$filename');
-        await file.writeAsString(buffer.toString(), flush: true);
+        await file.writeAsString(csv, flush: true);
 
         final renderBox = context.findRenderObject() as RenderBox;
         final sharePositionOrigin = Rect.fromLTWH(
@@ -145,11 +151,166 @@ class _StudentEditorPageState extends State<StudentEditorPage> {
       }
       if (outputPath != null) {
         final file = File(outputPath);
-        await file.writeAsString(buffer.toString(), flush: true);
+        await file.writeAsString(csv, flush: true);
         ScaffoldMessenger.of(
           context,
         ).showSnackBar(SnackBar(content: Text('导出完成: $outputPath')));
       }
+    }
+  }
+
+  Future<void> _qrExport() async {
+    final csv = _generateCsv();
+    await showQrExportDialog(context, csv);
+  }
+
+  Future<void> _qrImport() async {
+    final raw = await showQrScanner(context);
+    if (raw == null) return;
+
+    final match = RegExp(r'\|(\d+)/(\d+)$').firstMatch(raw);
+    if (match == null) {
+      await _processQrPayload(raw);
+      return;
+    }
+
+    final total = int.parse(match.group(2)!);
+    final chunks = List<String>.filled(total, '');
+    chunks[int.parse(match.group(1)!) - 1] = raw.substring(0, match.start);
+
+    int nextExpected() {
+      for (var i = 0; i < total; i++) {
+        if (chunks[i].isEmpty) return i;
+      }
+      return -1;
+    }
+
+    while (true) {
+      final expected = nextExpected();
+      if (expected < 0) break;
+
+      final collected = chunks.where((c) => c.isNotEmpty).length;
+      final proceed = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: Text('已扫描 $collected/$total'),
+          content: Text('请切换到第 ${expected + 1} 张二维码，然后点击继续。'),
+          actions: [
+            TextButton(
+              child: Text('取消'),
+              onPressed: () => Navigator.of(ctx).pop(false),
+            ),
+            ElevatedButton(
+              child: Text('继续'),
+              onPressed: () => Navigator.of(ctx).pop(true),
+            ),
+          ],
+        ),
+      );
+      if (proceed != true) return;
+
+      // keep scanning until the expected chunk is provided
+      while (true) {
+        final next = await showQrScanner(
+          context,
+          title: 'QR码导入 (${expected + 1}/$total)',
+        );
+        if (next == null) return;
+
+        final m = RegExp(r'\|(\d+)/(\d+)$').firstMatch(next);
+        if (m == null || int.parse(m.group(2)!) != total) {
+          if (mounted) {
+            await showDialog(
+              context: context,
+              builder: (ctx) => AlertDialog(
+                title: Text('格式错误'),
+                content: Text('扫描到无效的分段二维码，请扫描第 ${expected + 1} 张。'),
+                actions: [
+                  TextButton(
+                    child: Text('确定'),
+                    onPressed: () => Navigator.of(ctx).pop(),
+                  ),
+                ],
+              ),
+            );
+          }
+          continue;
+        }
+
+        final idx = int.parse(m.group(1)!) - 1;
+        if (idx != expected) {
+          final target = chunks[idx].isNotEmpty ? '已扫描过' : '不是当前需要的';
+          if (mounted) {
+            await showDialog(
+              context: context,
+              builder: (ctx) => AlertDialog(
+                title: Text('扫描顺序错误'),
+                content: Text(
+                  '这张是第 ${idx + 1} 张（$target）。\n请扫描第 ${expected + 1} 张二维码。',
+                ),
+                actions: [
+                  TextButton(
+                    child: Text('确定'),
+                    onPressed: () => Navigator.of(ctx).pop(),
+                  ),
+                ],
+              ),
+            );
+          }
+          continue;
+        }
+
+        chunks[idx] = next.substring(0, m.start);
+        break;
+      }
+    }
+
+    await _processQrPayload(chunks.join());
+  }
+
+  Future<void> _processQrPayload(String raw) async {
+    String csv;
+    try {
+      csv = decodeQrPayload(raw);
+    } catch (e) {
+      if (mounted) {
+        showDialog(
+          context: context,
+          builder: (ctx) => AlertDialog(
+            title: Text('解码失败'),
+            content: Text('无法解析二维码内容，请确认二维码来源正确。\n\n$e'),
+            actions: [
+              TextButton(
+                child: Text('确定'),
+                onPressed: () => Navigator.of(ctx).pop(),
+              ),
+            ],
+          ),
+        );
+      }
+      return;
+    }
+
+    final error = await _importCsv(csv);
+    if (error != null && mounted) {
+      showDialog(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: Text('导入失败'),
+          content: Text(error),
+          actions: [
+            TextButton(
+              child: Text('确定'),
+              onPressed: () => Navigator.of(ctx).pop(),
+            ),
+          ],
+        ),
+      );
+    } else if (mounted) {
+      await _loadStudents();
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('导入完成')));
     }
   }
 
@@ -208,13 +369,13 @@ class _StudentEditorPageState extends State<StudentEditorPage> {
       if (line.isEmpty) continue;
       final parts = line.split(',');
       if (parts.length < 3) {
-        return '第{i+1}行字段数量不足（应为3个，用英文逗号分隔）';
+        return '第${i + 1}行字段数量不足（应为3个，用英文逗号分隔）';
       }
       final name = parts[0].trim();
       final sexRaw = parts[1].trim();
       final no = parts[2].trim();
       if (name.isEmpty || no.isEmpty) {
-        return '第{i+1}行姓名或学号为空';
+        return '第${i + 1}行姓名或学号为空';
       }
       String gender = '男';
       if (sexRaw == '1') gender = '女';
@@ -442,6 +603,16 @@ class _StudentEditorPageState extends State<StudentEditorPage> {
                     title: Text('导出名单'),
                     onTap: () => Navigator.of(ctx).pop('export'),
                   ),
+                  ListTile(
+                    leading: Icon(Icons.qr_code_scanner),
+                    title: Text('QR码导入'),
+                    onTap: () => Navigator.of(ctx).pop('qr_import'),
+                  ),
+                  ListTile(
+                    leading: Icon(Icons.qr_code_2),
+                    title: Text('QR码导出'),
+                    onTap: () => Navigator.of(ctx).pop('qr_export'),
+                  ),
                 ],
               ),
             ),
@@ -452,6 +623,10 @@ class _StudentEditorPageState extends State<StudentEditorPage> {
             _importCsvDialog();
           } else if (selected == 'export') {
             _exportCsvDialog();
+          } else if (selected == 'qr_import') {
+            _qrImport();
+          } else if (selected == 'qr_export') {
+            _qrExport();
           }
         },
         child: Icon(Icons.add),
