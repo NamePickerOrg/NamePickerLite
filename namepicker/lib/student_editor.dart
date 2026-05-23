@@ -515,8 +515,15 @@ class _StudentEditorPageState extends State<StudentEditorPage> {
                       },
                     );
                     if (name != null && name.isNotEmpty) {
-                      await StudentDatabase.instance.createList(name);
-                      await _initLists(notifyGlobal: true);
+                      final newId = await StudentDatabase.instance.createList(name);
+                      lists = await StudentDatabase.instance.readAllLists();
+                      currentListId = newId;
+                      await _loadStudents();
+                      setState(() {});
+                      if (mounted) {
+                        final appState = Provider.of<MyAppState>(context, listen: false);
+                        appState.notifyListeners();
+                      }
                     }
                   },
                 ),
