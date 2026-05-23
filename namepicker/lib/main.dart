@@ -994,10 +994,22 @@ class _AboutPageState extends State<AboutPage> {
           ),
         ),
         const SizedBox(height: 16),
-        Text(
-          'NamePicker',
-          textAlign: TextAlign.center,
-          style: theme.textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.bold),
+        Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Text(
+              'NamePicker',
+              style: theme.textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(width: 4),
+            Padding(
+              padding: const EdgeInsets.only(top: 4),
+              child: SvgPicture.asset(
+                'assets/lite.svg',
+                height: (theme.textTheme.headlineSmall?.fontSize ?? 24) / 1.414,
+              ),
+            ),
+          ],
         ),
         const SizedBox(height: 4),
         Text(
@@ -1120,15 +1132,17 @@ class _AboutPageState extends State<AboutPage> {
                       CircleAvatar(
                         radius: 20,
                         backgroundColor: colorScheme.primaryContainer,
-                        child: Image.network(
-                          display[i].avatarUrl,
-                          width: 40,
-                          height: 40,
-                          fit: BoxFit.cover,
-                          errorBuilder: (context, error, stackTrace) => Icon(
-                            Icons.person,
-                            size: 20,
-                            color: colorScheme.onPrimaryContainer,
+                        child: ClipOval(
+                          child: Image.network(
+                            display[i].avatarUrl,
+                            width: 40,
+                            height: 40,
+                            fit: BoxFit.cover,
+                            errorBuilder: (context, error, stackTrace) => Icon(
+                              Icons.person,
+                              size: 20,
+                              color: colorScheme.onPrimaryContainer,
+                            ),
                           ),
                         ),
                       ),
