@@ -1,4 +1,21 @@
 {
   "projectName": "NamePickerLite",
-  "projectOwner": "NamePickerOrg"
+  "projectOwner": "NamePickerOrg",
+  "files": [
+    "README.md"
+  ],
+  "commitType": "docs",
+  "commitConvention": "angular",
+  "contributorsPerLine": 7,
+  "contributors": [
+    {
+      "login": "LHGS-github",
+      "name": "灵魂歌手er",
+      "avatar_url": "https://avatars.githubusercontent.com/u/92249708?v=4",
+      "profile": "https://github.com/LHGS-github",
+      "contributions": [
+        "code"
+      ]
+    }
+  ]
 }
