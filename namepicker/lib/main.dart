@@ -983,182 +983,232 @@ class _AboutPageState extends State<AboutPage> {
     final colorScheme = Theme.of(context).colorScheme;
     final theme = Theme.of(context);
 
-    return Center(
+    final header = Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Center(
+          child: SvgPicture.asset(
+            'assets/NamePicker-64rad.svg',
+            width: 96,
+            height: 96,
+          ),
+        ),
+        const SizedBox(height: 16),
+        Text(
+          'NamePicker',
+          textAlign: TextAlign.center,
+          style: theme.textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.bold),
+        ),
+        const SizedBox(height: 4),
+        Text(
+          "$version · $codename",
+          textAlign: TextAlign.center,
+          style: theme.textTheme.bodyMedium?.copyWith(color: colorScheme.onSurfaceVariant),
+        ),
+      ],
+    );
+
+    final devCard = Card(
+      elevation: 0,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(18),
+        side: BorderSide(color: colorScheme.outlineVariant, width: 1),
+      ),
+      color: colorScheme.surface,
       child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: SingleChildScrollView(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-            Center(
-              child: SvgPicture.asset(
-                'assets/NamePicker-64rad.svg',
-                width: 96,
-                height: 96,
-              ),
+        padding: const EdgeInsets.all(20),
+        child: Column(
+          children: [
+            Row(
+              children: [
+                CircleAvatar(
+                  radius: 24,
+                  backgroundColor: colorScheme.primaryContainer,
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(24),
+                    child: Image.asset('assets/avatars/lhgser.jpg', width: 48, height: 48),
+                  ),
+                ),
+                const SizedBox(width: 16),
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('灵魂歌手er', style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w600)),
+                    Text('开发者', style: theme.textTheme.bodySmall?.copyWith(color: colorScheme.onSurfaceVariant)),
+                  ],
+                ),
+              ],
             ),
             const SizedBox(height: 16),
             Text(
-              'NamePicker',
+              '「这次能让我玩得开心点吗？」',
               textAlign: TextAlign.center,
-              style: theme.textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.bold),
+              style: theme.textTheme.bodyMedium?.copyWith(color: colorScheme.primary),
             ),
-            const SizedBox(height: 4),
-            Text(
-              "$version · $codename",
-              textAlign: TextAlign.center,
-              style: theme.textTheme.bodyMedium?.copyWith(color: colorScheme.onSurfaceVariant),
+            const SizedBox(height: 16),
+            SizedBox(
+              width: double.infinity,
+              child: OutlinedButton.icon(
+                onPressed: () async {
+                  const url = 'https://github.com/NamePickerOrg/NamePicker';
+                  final uri = Uri.parse(url);
+                  if (await canLaunchUrl(uri)) {
+                    await launchUrl(uri);
+                  }
+                },
+                icon: Icon(Icons.open_in_new),
+                label: Text('GitHub'),
+              ),
             ),
-            const SizedBox(height: 24),
-              Card(
-                elevation: 0,
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(18),
-                  side: BorderSide(color: colorScheme.outlineVariant, width: 1),
-                ),
-                color: colorScheme.surface,
-                child: Padding(
-                  padding: const EdgeInsets.all(20),
-                  child: Column(
+          ],
+        ),
+      ),
+    );
+
+    final copyright = Text(
+      "© 2025-2026 NamePickerOrg",
+      textAlign: TextAlign.center,
+      style: theme.textTheme.bodySmall?.copyWith(color: colorScheme.onSurfaceVariant),
+    );
+
+    final contributorsCard = FutureBuilder<List<Contributor>>(
+      future: loadContributors(),
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return const Padding(
+            padding: EdgeInsets.all(24),
+            child: Center(child: CircularProgressIndicator()),
+          );
+        }
+        if (snapshot.hasError || !snapshot.hasData) {
+          return Card(
+            elevation: 0,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(18),
+              side: BorderSide(color: colorScheme.outlineVariant, width: 1),
+            ),
+            color: colorScheme.surface,
+            child: const Padding(
+              padding: EdgeInsets.all(20),
+              child: Text('无法加载贡献者列表'),
+            ),
+          );
+        }
+
+        final all = snapshot.data!;
+        final hasMore = all.length > 3;
+        final display = _contributorsExpanded ? all : all.take(3).toList();
+
+        return Card(
+          elevation: 0,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(18),
+            side: BorderSide(color: colorScheme.outlineVariant, width: 1),
+          ),
+          color: colorScheme.surface,
+          child: Padding(
+            padding: const EdgeInsets.all(20),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('贡献者', style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w600)),
+                const SizedBox(height: 12),
+                for (int i = 0; i < display.length; i++) ...[
+                  if (i > 0) const SizedBox(height: 12),
+                  Row(
                     children: [
-                      Row(
-                        children: [
-                          CircleAvatar(
-                            radius: 24,
-                            backgroundColor: colorScheme.primaryContainer,
-                            child: ClipRRect(
-                              borderRadius: BorderRadius.circular(24),
-                              child: Image.asset('assets/avatars/lhgser.jpg', width: 48, height: 48),
+                      CircleAvatar(
+                        radius: 20,
+                        backgroundColor: colorScheme.primaryContainer,
+                        child: Image.network(
+                          display[i].avatarUrl,
+                          width: 40,
+                          height: 40,
+                          fit: BoxFit.cover,
+                          errorBuilder: (context, error, stackTrace) => Icon(
+                            Icons.person,
+                            size: 20,
+                            color: colorScheme.onPrimaryContainer,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 14),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              display[i].name,
+                              style: theme.textTheme.bodyLarge?.copyWith(fontWeight: FontWeight.w600),
                             ),
-                          ),
-                          const SizedBox(width: 16),
-                          Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text('灵魂歌手er', style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w600)),
-                              Text('开发者', style: theme.textTheme.bodySmall?.copyWith(color: colorScheme.onSurfaceVariant)),
-                            ],
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 16),
-                      Text(
-                        '「这次能让我玩得开心点吗？」',
-                        textAlign: TextAlign.center,
-                        style: theme.textTheme.bodyMedium?.copyWith(color: colorScheme.primary),
-                      ),
-                      const SizedBox(height: 16),
-                      SizedBox(
-                        width: double.infinity,
-                        child: OutlinedButton.icon(
-                          onPressed: () async {
-                            const url = 'https://github.com/NamePickerOrg/NamePicker';
-                            final uri = Uri.parse(url);
-                            if (await canLaunchUrl(uri)) {
-                              await launchUrl(uri);
-                            }
-                          },
-                          icon: Icon(Icons.open_in_new),
-                          label: Text('GitHub'),
+                            const SizedBox(height: 2),
+                            Text(
+                              _formatContributions(display[i].contributions),
+                              style: theme.textTheme.bodySmall?.copyWith(color: colorScheme.onSurfaceVariant),
+                            ),
+                          ],
                         ),
                       ),
                     ],
                   ),
-                ),
-              ),
-              const SizedBox(height: 12),
-              FutureBuilder<List<Contributor>>(
-                future: loadContributors(),
-                builder: (context, snapshot) {
-                  if (snapshot.connectionState == ConnectionState.waiting) {
-                    return const Padding(
-                      padding: EdgeInsets.all(24),
-                      child: Center(child: CircularProgressIndicator()),
-                    );
-                  }
-                  if (snapshot.hasError || !snapshot.hasData) {
-                    return Card(
-                      elevation: 0,
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(18),
-                        side: BorderSide(color: colorScheme.outlineVariant, width: 1),
-                      ),
-                      color: colorScheme.surface,
-                      child: const Padding(
-                        padding: EdgeInsets.all(20),
-                        child: Text('无法加载贡献者列表'),
-                      ),
-                    );
-                  }
-
-                  final all = snapshot.data!;
-                  final hasMore = all.length > 3;
-                  final display = _contributorsExpanded ? all : all.take(3).toList();
-
-                  return Card(
-                    elevation: 0,
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(18),
-                      side: BorderSide(color: colorScheme.outlineVariant, width: 1),
+                ],
+                if (hasMore)
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: TextButton(
+                      onPressed: () => setState(() => _contributorsExpanded = !_contributorsExpanded),
+                      child: Text(_contributorsExpanded ? '收起' : '展开全部 (${all.length})'),
                     ),
-                    color: colorScheme.surface,
-                    child: Padding(
-                      padding: const EdgeInsets.all(20),
+                  ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: SingleChildScrollView(
+          child: LayoutBuilder(
+            builder: (context, constraints) {
+              if (constraints.maxWidth >= 600) {
+                return Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Expanded(
                       child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
                         children: [
-                          Text('贡献者', style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w600)),
-                          const SizedBox(height: 12),
-                          for (int i = 0; i < display.length; i++) ...[
-                            if (i > 0) const SizedBox(height: 12),
-                            Row(
-                              children: [
-                                CircleAvatar(
-                                  radius: 20,
-                                  backgroundColor: colorScheme.primaryContainer,
-                                  backgroundImage: NetworkImage(display[i].avatarUrl),
-                                ),
-                                const SizedBox(width: 14),
-                                Expanded(
-                                  child: Column(
-                                    crossAxisAlignment: CrossAxisAlignment.start,
-                                    children: [
-                                      Text(
-                                        display[i].name,
-                                        style: theme.textTheme.bodyLarge?.copyWith(fontWeight: FontWeight.w600),
-                                      ),
-                                      const SizedBox(height: 2),
-                                      Text(
-                                        _formatContributions(display[i].contributions),
-                                        style: theme.textTheme.bodySmall?.copyWith(color: colorScheme.onSurfaceVariant),
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ],
-                          if (hasMore)
-                            Align(
-                              alignment: Alignment.centerLeft,
-                              child: TextButton(
-                                onPressed: () => setState(() => _contributorsExpanded = !_contributorsExpanded),
-                                child: Text(_contributorsExpanded ? '收起' : '展开全部 (${all.length})'),
-                              ),
-                            ),
+                          header,
+                          const SizedBox(height: 24),
+                          devCard,
+                          const SizedBox(height: 24),
+                          copyright,
                         ],
                       ),
                     ),
-                  );
-                },
-              ),
-              const SizedBox(height: 24),
-              Text(
-                "© 2025-2026 NamePickerOrg",
-                textAlign: TextAlign.center,
-                style: theme.textTheme.bodySmall?.copyWith(color: colorScheme.onSurfaceVariant),
-              ),
-            ],
+                    const SizedBox(width: 16),
+                    Expanded(
+                      child: contributorsCard,
+                    ),
+                  ],
+                );
+              }
+              return Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  header,
+                  const SizedBox(height: 24),
+                  devCard,
+                  const SizedBox(height: 12),
+                  contributorsCard,
+                  const SizedBox(height: 24),
+                  copyright,
+                ],
+              );
+            },
           ),
         ),
       ),
