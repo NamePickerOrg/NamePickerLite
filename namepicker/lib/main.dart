@@ -1117,8 +1117,6 @@ class _AboutPageState extends State<AboutPage> {
                                   radius: 20,
                                   backgroundColor: colorScheme.primaryContainer,
                                   backgroundImage: NetworkImage(display[i].avatarUrl),
-                                  onBackgroundImageError: (_, __) {},
-                                  child: Icon(Icons.person, size: 20, color: colorScheme.onPrimaryContainer),
                                 ),
                                 const SizedBox(width: 14),
                                 Expanded(
