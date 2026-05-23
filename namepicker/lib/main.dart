@@ -963,13 +963,25 @@ class AboutPage extends StatefulWidget {
 class _AboutPageState extends State<AboutPage> {
   bool _contributorsExpanded = false;
 
+  static const _contributionLabels = {
+    'code': '代码',
+    'design': '设计',
+    'maintenance': '维护',
+    'bug': '缺陷报告',
+    'doc': '文档',
+    'review': '审查',
+    'test': '测试',
+    'ideas': '创意',
+  };
+
+  String _formatContributions(List<String> contributions) {
+    return contributions.map((c) => _contributionLabels[c] ?? c).join(' · ');
+  }
+
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
     final theme = Theme.of(context);
-    final hasMore = contributors.length > 3;
-    final displayContributors =
-        _contributorsExpanded ? contributors : contributors.take(3).toList();
 
     return Center(
       child: Padding(
@@ -1016,7 +1028,7 @@ class _AboutPageState extends State<AboutPage> {
                             backgroundColor: colorScheme.primaryContainer,
                             child: ClipRRect(
                               borderRadius: BorderRadius.circular(24),
-                              child: Image.asset('assets/avaters/lhgser.jpg', width: 48, height: 48),
+                              child: Image.asset('assets/avatars/lhgser.jpg', width: 48, height: 48),
                             ),
                           ),
                           const SizedBox(width: 16),
@@ -1031,7 +1043,7 @@ class _AboutPageState extends State<AboutPage> {
                       ),
                       const SizedBox(height: 16),
                       Text(
-                        "「这次能让我玩得开心点吗？」",
+                        '「这次能让我玩得开心点吗？」',
                         textAlign: TextAlign.center,
                         style: theme.textTheme.bodyMedium?.copyWith(color: colorScheme.primary),
                       ),
@@ -1055,46 +1067,92 @@ class _AboutPageState extends State<AboutPage> {
                 ),
               ),
               const SizedBox(height: 12),
-              Card(
-                elevation: 0,
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(18),
-                  side: BorderSide(color: colorScheme.outlineVariant, width: 1),
-                ),
-                color: colorScheme.surface,
-                child: Padding(
-                  padding: const EdgeInsets.all(20),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text('贡献者', style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w600)),
-                      const SizedBox(height: 12),
-                      if (contributors.isEmpty)
-                        Text('暂无贡献者', style: theme.textTheme.bodyMedium?.copyWith(color: colorScheme.onSurfaceVariant))
-                      else ...[
-                        for (final c in displayContributors)
-                          Padding(
-                            padding: const EdgeInsets.symmetric(vertical: 6),
-                            child: Row(
+              FutureBuilder<List<Contributor>>(
+                future: loadContributors(),
+                builder: (context, snapshot) {
+                  if (snapshot.connectionState == ConnectionState.waiting) {
+                    return const Padding(
+                      padding: EdgeInsets.all(24),
+                      child: Center(child: CircularProgressIndicator()),
+                    );
+                  }
+                  if (snapshot.hasError || !snapshot.hasData) {
+                    return Card(
+                      elevation: 0,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(18),
+                        side: BorderSide(color: colorScheme.outlineVariant, width: 1),
+                      ),
+                      color: colorScheme.surface,
+                      child: const Padding(
+                        padding: EdgeInsets.all(20),
+                        child: Text('无法加载贡献者列表'),
+                      ),
+                    );
+                  }
+
+                  final all = snapshot.data!;
+                  final hasMore = all.length > 3;
+                  final display = _contributorsExpanded ? all : all.take(3).toList();
+
+                  return Card(
+                    elevation: 0,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(18),
+                      side: BorderSide(color: colorScheme.outlineVariant, width: 1),
+                    ),
+                    color: colorScheme.surface,
+                    child: Padding(
+                      padding: const EdgeInsets.all(20),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text('贡献者', style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w600)),
+                          const SizedBox(height: 12),
+                          for (int i = 0; i < display.length; i++) ...[
+                            if (i > 0) const SizedBox(height: 12),
+                            Row(
                               children: [
-                                Icon(Icons.person, size: 20, color: colorScheme.onSurfaceVariant),
-                                const SizedBox(width: 12),
-                                Text(c, style: theme.textTheme.bodyMedium),
+                                CircleAvatar(
+                                  radius: 20,
+                                  backgroundColor: colorScheme.primaryContainer,
+                                  backgroundImage: NetworkImage(display[i].avatarUrl),
+                                  onBackgroundImageError: (_, __) {},
+                                  child: Icon(Icons.person, size: 20, color: colorScheme.onPrimaryContainer),
+                                ),
+                                const SizedBox(width: 14),
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      Text(
+                                        display[i].name,
+                                        style: theme.textTheme.bodyLarge?.copyWith(fontWeight: FontWeight.w600),
+                                      ),
+                                      const SizedBox(height: 2),
+                                      Text(
+                                        _formatContributions(display[i].contributions),
+                                        style: theme.textTheme.bodySmall?.copyWith(color: colorScheme.onSurfaceVariant),
+                                      ),
+                                    ],
+                                  ),
+                                ),
                               ],
                             ),
-                          ),
-                        if (hasMore)
-                          Align(
-                            alignment: Alignment.centerLeft,
-                            child: TextButton(
-                              onPressed: () => setState(() => _contributorsExpanded = !_contributorsExpanded),
-                              child: Text(_contributorsExpanded ? '收起' : '展开全部 (${contributors.length})'),
+                          ],
+                          if (hasMore)
+                            Align(
+                              alignment: Alignment.centerLeft,
+                              child: TextButton(
+                                onPressed: () => setState(() => _contributorsExpanded = !_contributorsExpanded),
+                                child: Text(_contributorsExpanded ? '收起' : '展开全部 (${all.length})'),
+                              ),
                             ),
-                          ),
-                      ],
-                    ],
-                  ),
-                ),
+                        ],
+                      ),
+                    ),
+                  );
+                },
               ),
               const SizedBox(height: 24),
               Text(
