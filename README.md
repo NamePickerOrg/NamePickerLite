@@ -83,7 +83,7 @@ A: Python 的运行效率不高，慢属于正常现象
 <table>
   <tbody>
     <tr>
-      <td align="center" valign="top" width="14.28%"><a href="https://github.com/LHGS-github"><img src="https://avatars.githubusercontent.com/u/92249708?v=4?s=100" width="100px;" alt="灵魂歌手er"/><br /><sub><b>灵魂歌手er</b></sub></a><br /><a href="#code-LHGS-github" title="Code">💻</a></td>
+      <td align="center" valign="top" width="14.28%"><a href="https://github.com/LHGS-github"><img src="https://avatars.githubusercontent.com/u/92249708?v=4?s=100" width="100px;" alt="灵魂歌手er"/><br /><sub><b>灵魂歌手er</b></sub></a><br /><a href="#code-LHGS-github" title="Code">💻</a> <a href="#maintenance-LHGS-github" title="Maintenance">🚧</a> <a href="#design-LHGS-github" title="Design">🎨</a></td>
     </tr>
   </tbody>
 </table>
