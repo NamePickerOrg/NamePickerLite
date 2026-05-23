@@ -46,4 +46,4 @@ flutter:
         - asset: fonts/HarmonyOS_Sans_SC_Regular.ttf
   assets:
     - assets/
-    - assets/avaters/
+    - assets/avatars/
