@@ -2,14 +2,25 @@ import 'main.dart';
 import 'package:flutter/material.dart';
 import 'student.dart';
 import 'student_db.dart';
+import 'csv_transfer.dart';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
 import 'package:file_picker/file_picker.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:provider/provider.dart';
 import 'qr_transfer.dart';
+
+/// 学生已经不在数据库中（例如在另一个窗口被删除）。
+class StudentMissingException implements Exception {
+  final String message;
+  const StudentMissingException(this.message);
+
+  @override
+  String toString() => message;
+}
 
 class StudentEditorPage extends StatefulWidget {
   const StudentEditorPage({Key? key}) : super(key: key);
@@ -19,164 +30,310 @@ class StudentEditorPage extends StatefulWidget {
 }
 
 class _StudentEditorPageState extends State<StudentEditorPage> {
-  List<ListGroup> lists = [];
-  int? currentListId;
   List<Student> students = [];
   bool loading = true;
+  String? _loadError;
+  int? _loadedListId;
+  int _loadedRevision = -1;
+  int _loadRequest = 0;
+  bool _transferBusy = false;
+
+  MyAppState get _appState => Provider.of<MyAppState>(context, listen: false);
+  List<ListGroup> get lists => _appState.lists;
+  int? get currentListId => _appState.currentListId;
+
+  /// 页面缓存与当前名单完全一致时才允许导出/导入，避免导出上一份名单。
+  bool get _canTransfer =>
+      _loadedListId == currentListId &&
+      _loadedRevision == _appState.rosterRevision &&
+      !loading &&
+      _loadError == null &&
+      !_transferBusy;
 
   @override
-  void initState() {
-    super.initState();
-    _initLists();
-  }
-
-  Future<void> _initLists({bool notifyGlobal = false}) async {
-    lists = await StudentDatabase.instance.readAllLists();
-    if (lists.isEmpty) {
-      int id = await StudentDatabase.instance.createList('默认名单');
-      lists = await StudentDatabase.instance.readAllLists();
-      currentListId = id;
-    } else {
-      currentListId = lists.first.id;
-    }
-    await _loadStudents();
-    setState(() {});
-    if (notifyGlobal) {
-      // 通知全局 Provider 刷新
-      if (mounted) {
-        final appState = Provider.of<MyAppState>(context, listen: false);
-        appState.notifyListeners();
-      }
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    // 注册对全局名单状态的依赖：名单切换与名单内容变化都从这里同步。
+    final appState = Provider.of<MyAppState>(context);
+    if (!appState.isReady) return;
+    if (appState.currentListId != _loadedListId ||
+        appState.rosterRevision != _loadedRevision) {
+      _loadStudents();
     }
   }
 
   Future<void> _loadStudents() async {
-    if (currentListId == null) return;
-    students = await StudentDatabase.instance.readAll(currentListId!);
+    final appState = _appState;
+    final listId = appState.currentListId;
+    final revision = appState.rosterRevision;
+    final request = ++_loadRequest;
+    _loadedListId = listId;
+    _loadedRevision = revision;
+    if (!mounted) return;
     setState(() {
-      loading = false;
+      loading = true;
+      _loadError = null;
+      students = [];
     });
+    if (listId == null) {
+      setState(() => loading = false);
+      return;
+    }
+    try {
+      final result = await appState.readStudents(listId);
+      // 只接受仍然是最新请求、且名单与内容版本都没有变化的返回。
+      if (!mounted || request != _loadRequest) return;
+      if (appState.currentListId != listId ||
+          appState.rosterRevision != revision) {
+        return;
+      }
+      setState(() {
+        students = result;
+        loading = false;
+      });
+    } catch (_) {
+      if (!mounted || request != _loadRequest) return;
+      setState(() {
+        loading = false;
+        _loadError = '名单加载失败';
+      });
+    }
+  }
+
+  Future<bool?> _confirm({
+    required String title,
+    required String message,
+    required String confirmLabel,
+    bool destructive = false,
+  }) {
+    return showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(title),
+        content: Text(message),
+        actions: [
+          TextButton(
+            // 破坏性操作的默认焦点放在取消上。
+            autofocus: true,
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            style: destructive
+                ? FilledButton.styleFrom(
+                    backgroundColor: Theme.of(ctx).colorScheme.error,
+                    foregroundColor: Theme.of(ctx).colorScheme.onError,
+                  )
+                : null,
+            child: Text(confirmLabel),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _createList() async {
+    final appState = _appState;
+    await showDialog<void>(
+      context: context,
+      builder: (_) => ListNameDialog(
+        title: '新建名单',
+        initialName: '',
+        onSave: (name) async {
+          await appState.createList(name);
+        },
+      ),
+    );
+  }
+
+  Future<void> _renameList(ListGroup list) async {
+    final appState = _appState;
+    await showDialog<void>(
+      context: context,
+      builder: (_) => ListNameDialog(
+        title: '重命名单',
+        initialName: list.name,
+        onSave: (name) => appState.renameList(ListGroup(id: list.id, name: name)),
+      ),
+    );
+  }
+
+  Future<void> _deleteList(ListGroup list) async {
+    final appState = _appState;
+    final messenger = ScaffoldMessenger.of(context);
+    final confirmed = await _confirm(
+      title: '删除名单',
+      message: '确定删除名单「${list.name}」吗？该名单内所有学生也将删除，且无法恢复。',
+      confirmLabel: '删除',
+      destructive: true,
+    );
+    if (confirmed != true) return;
+    try {
+      final deleted = await appState.deleteList(list.id!);
+      if (!deleted) {
+        messenger.showSnackBar(const SnackBar(content: Text('至少保留一个名单')));
+      }
+    } catch (_) {
+      messenger.showSnackBar(const SnackBar(content: Text('删除名单失败，请重试')));
+    }
   }
 
   Future<void> _addOrEditStudent([Student? student]) async {
-    final result = await showDialog<Student>(
+    final appState = _appState;
+    final targetListId = appState.currentListId;
+    if (targetListId == null) return;
+    final originalId = student?.id;
+    await showDialog<void>(
       context: context,
-      builder: (context) => StudentDialog(student: student),
+      builder: (_) => StudentDialog(
+        student: student,
+        onSave: (edited) async {
+          if (originalId == null) {
+            await StudentDatabase.instance.create(edited, targetListId);
+          } else {
+            final affected = await StudentDatabase.instance.update(edited);
+            if (affected == 0) {
+              throw const StudentMissingException('学生已不存在');
+            }
+          }
+          appState.studentsChanged(targetListId);
+        },
+      ),
     );
-    if (result != null) {
-      if (student == null) {
-        await StudentDatabase.instance.create(result, currentListId!);
-      } else {
-        await StudentDatabase.instance.update(result);
-      }
-      await _loadStudents();
-      // 通知全局 Provider 刷新
-      if (mounted) {
-        final appState = Provider.of<MyAppState>(context, listen: false);
-        appState.notifyListeners();
-      }
-    }
   }
 
-  Future<void> _deleteStudent(Student student) async {
-    await StudentDatabase.instance.delete(student.id!);
-    await _loadStudents();
-    // 通知全局 Provider 刷新
-    if (mounted) {
-      final appState = Provider.of<MyAppState>(context, listen: false);
-      appState.notifyListeners();
+  Future<void> _confirmDeleteStudent(Student student) async {
+    final targetId = student.id;
+    if (targetId == null) return;
+    final targetListId = _loadedListId;
+    final messenger = ScaffoldMessenger.of(context);
+    final confirmed = await _confirm(
+      title: '删除学生',
+      message: '确定删除「${student.name}」吗？此操作无法撤销。',
+      confirmLabel: '删除',
+      destructive: true,
+    );
+    if (confirmed != true) return;
+    try {
+      final affected = await StudentDatabase.instance.delete(targetId);
+      if (affected == 0) {
+        messenger.showSnackBar(const SnackBar(content: Text('学生已不存在')));
+      }
+      if (targetListId != null) _appState.studentsChanged(targetListId);
+    } catch (_) {
+      messenger.showSnackBar(const SnackBar(content: Text('删除学生失败，请重试')));
     }
-  }
-
-  String _generateCsv() {
-    final buffer = StringBuffer();
-    buffer.writeln('name,sex,no');
-    for (final s in students) {
-      final sexRaw = s.gender == '女' ? '1' : '0';
-      buffer.writeln('${s.name},${sexRaw},${s.studentId}');
-    }
-    return buffer.toString();
   }
 
   Future<void> _exportCsvDialog() async {
-    final csv = _generateCsv();
+    if (!_canTransfer) return;
+    final csv = studentsToCsv(students);
+    final messenger = ScaffoldMessenger.of(context);
     if (kIsWeb) {
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text('Web 端暂不支持导出')));
+      messenger.showSnackBar(
+        const SnackBar(content: Text('Web 端暂不支持导出')),
+      );
       return;
     }
-    final now = DateTime.now();
-    final timestamp =
-        "${now.year}${now.month.toString().padLeft(2, '0')}${now.day.toString().padLeft(2, '0')}-${now.hour.toString().padLeft(2, '0')}${now.minute.toString().padLeft(2, '0')}";
-    final filename = "namepicker-export-$timestamp.csv";
+    // 分享位置要在 await 之前从当前页面的 RenderBox 取。
+    final renderBox = context.findRenderObject() as RenderBox?;
+    final sharePositionOrigin = renderBox == null
+        ? null
+        : renderBox.localToGlobal(Offset.zero) & renderBox.size;
 
-    if (Platform.isAndroid || Platform.isIOS) {
+    setState(() => _transferBusy = true);
+    try {
+      final now = DateTime.now();
+      final timestamp =
+          "${now.year}${now.month.toString().padLeft(2, '0')}${now.day.toString().padLeft(2, '0')}-${now.hour.toString().padLeft(2, '0')}${now.minute.toString().padLeft(2, '0')}";
+      final filename = "namepicker-export-$timestamp.csv";
+
       if (Platform.isAndroid) {
-        final dir = '/storage/emulated/0/Download';
-        final file = File('$dir/$filename');
-        await file.writeAsString(csv, flush: true);
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('导出完成: $dir/$filename')));
-      } else {
+        // 通过系统保存器写文件，不直接写公共目录、不申请存储权限。
+        final savedPath = await FilePicker.platform.saveFile(
+          dialogTitle: '导出名单为 CSV',
+          fileName: filename,
+          type: FileType.custom,
+          allowedExtensions: ['csv'],
+          bytes: Uint8List.fromList(utf8.encode(csv)),
+        );
+        if (savedPath == null) return;
+        messenger.showSnackBar(const SnackBar(content: Text('导出完成')));
+      } else if (Platform.isIOS) {
         final directory = await getTemporaryDirectory();
         final file = File('${directory.path}/$filename');
         await file.writeAsString(csv, flush: true);
 
-        final renderBox = context.findRenderObject() as RenderBox;
-        final sharePositionOrigin = Rect.fromLTWH(
-          0,
-          0,
-          renderBox.size.width,
-          renderBox.size.height,
-        );
-
-        await Share.shareXFiles(
+        // ignore: deprecated_member_use
+        final result = await Share.shareXFiles(
           [XFile(file.path)],
           sharePositionOrigin: sharePositionOrigin,
         );
-      }
-    } else {
-      String? outputPath;
-      try {
-        outputPath = await FilePicker.platform.saveFile(
+        switch (result.status) {
+          case ShareResultStatus.dismissed:
+            // 用户取消分享，不提示成功。
+            break;
+          case ShareResultStatus.success:
+            messenger.showSnackBar(
+              const SnackBar(content: Text('已完成分享操作')),
+            );
+          case ShareResultStatus.unavailable:
+            messenger.showSnackBar(
+              const SnackBar(content: Text('分享面板已打开，无法确认结果')),
+            );
+        }
+      } else {
+        final outputPath = await FilePicker.platform.saveFile(
           dialogTitle: '导出名单为 CSV',
           fileName: filename,
           type: FileType.custom,
           allowedExtensions: ['csv'],
         );
-      } catch (e) {
-        outputPath = null;
+        if (outputPath == null) return;
+        await File(outputPath).writeAsString(csv, flush: true);
+        messenger.showSnackBar(
+          SnackBar(content: Text('导出完成: $outputPath')),
+        );
       }
-      if (outputPath != null) {
-        final file = File(outputPath);
-        await file.writeAsString(csv, flush: true);
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('导出完成: $outputPath')));
-      }
+    } catch (_) {
+      messenger.showSnackBar(const SnackBar(content: Text('导出失败，请重试')));
+    } finally {
+      if (mounted) setState(() => _transferBusy = false);
     }
   }
 
   Future<void> _qrExport() async {
-    final csv = _generateCsv();
+    if (!_canTransfer) return;
+    final csv = studentsToCsv(students);
     await showQrExportDialog(context, csv);
   }
 
   Future<void> _qrImport() async {
-    final raw = await showQrScanner(context);
-    if (raw == null) return;
+    if (!_canTransfer) return;
+    final targetListId = _loadedListId;
+    final targetListName = _listName(targetListId);
+    if (targetListId == null) return;
 
-    final match = RegExp(r'\|(\d+)/(\d+)$').firstMatch(raw);
-    if (match == null) {
-      await _processQrPayload(raw);
+    final first = await showQrScanner(context);
+    if (first == null) return;
+
+    final QrChunkRef? firstRef;
+    try {
+      firstRef = parseQrChunk(first);
+    } on FormatException catch (e) {
+      if (mounted) await _showInfo('格式错误', e.message);
+      return;
+    }
+    if (firstRef == null) {
+      await _processQrPayload(first, targetListId, targetListName);
       return;
     }
 
-    final total = int.parse(match.group(2)!);
+    // 先校验分片信息，再分配数组。
+    final total = firstRef.total;
     final chunks = List<String>.filled(total, '');
-    chunks[int.parse(match.group(1)!) - 1] = raw.substring(0, match.start);
+    chunks[firstRef.index - 1] = firstRef.payload;
 
     int nextExpected() {
       for (var i = 0; i < total; i++) {
@@ -188,6 +345,7 @@ class _StudentEditorPageState extends State<StudentEditorPage> {
     while (true) {
       final expected = nextExpected();
       if (expected < 0) break;
+      if (!mounted) return;
 
       final collected = chunks.where((c) => c.isNotEmpty).length;
       final proceed = await showDialog<bool>(
@@ -197,11 +355,11 @@ class _StudentEditorPageState extends State<StudentEditorPage> {
           content: Text('请切换到第 ${expected + 1} 张二维码，然后点击继续。'),
           actions: [
             TextButton(
-              child: Text('取消'),
+              child: const Text('取消'),
               onPressed: () => Navigator.of(ctx).pop(false),
             ),
-            ElevatedButton(
-              child: Text('继续'),
+            FilledButton(
+              child: const Text('继续'),
               onPressed: () => Navigator.of(ctx).pop(true),
             ),
           ],
@@ -209,180 +367,178 @@ class _StudentEditorPageState extends State<StudentEditorPage> {
       );
       if (proceed != true) return;
 
-      // keep scanning until the expected chunk is provided
+      // 持续扫描，直到拿到当前需要的分片。
       while (true) {
+        if (!mounted) return;
         final next = await showQrScanner(
           context,
           title: 'QR 码导入 (${expected + 1}/$total)',
         );
         if (next == null) return;
 
-        final m = RegExp(r'\|(\d+)/(\d+)$').firstMatch(next);
-        if (m == null || int.parse(m.group(2)!) != total) {
+        final QrChunkRef? ref;
+        try {
+          ref = parseQrChunk(next);
+        } on FormatException catch (e) {
+          if (mounted) await _showInfo('格式错误', e.message);
+          continue;
+        }
+        if (ref == null || ref.total != total) {
           if (mounted) {
-            await showDialog(
-              context: context,
-              builder: (ctx) => AlertDialog(
-                title: Text('格式错误'),
-                content: Text('扫描到无效的分段二维码，请扫描第 ${expected + 1} 张。'),
-                actions: [
-                  TextButton(
-                    child: Text('确定'),
-                    onPressed: () => Navigator.of(ctx).pop(),
-                  ),
-                ],
-              ),
+            await _showInfo(
+              '格式错误',
+              '扫描到无效的分段二维码，请扫描第 ${expected + 1} 张。',
+            );
+          }
+          continue;
+        }
+        if (ref.index != expected + 1) {
+          final target = chunks[ref.index - 1].isNotEmpty ? '已扫描过' : '不是当前需要的';
+          if (mounted) {
+            await _showInfo(
+              '扫描顺序错误',
+              '这张是第 ${ref.index} 张（$target）。\n请扫描第 ${expected + 1} 张二维码。',
             );
           }
           continue;
         }
 
-        final idx = int.parse(m.group(1)!) - 1;
-        if (idx != expected) {
-          final target = chunks[idx].isNotEmpty ? '已扫描过' : '不是当前需要的';
-          if (mounted) {
-            await showDialog(
-              context: context,
-              builder: (ctx) => AlertDialog(
-                title: Text('扫描顺序错误'),
-                content: Text(
-                  '这张是第 ${idx + 1} 张（$target）。\n请扫描第 ${expected + 1} 张二维码。',
-                ),
-                actions: [
-                  TextButton(
-                    child: Text('确定'),
-                    onPressed: () => Navigator.of(ctx).pop(),
-                  ),
-                ],
-              ),
-            );
-          }
-          continue;
-        }
-
-        chunks[idx] = next.substring(0, m.start);
+        chunks[expected] = ref.payload;
         break;
       }
     }
 
-    await _processQrPayload(chunks.join());
+    await _processQrPayload(chunks.join(), targetListId, targetListName);
   }
 
-  Future<void> _processQrPayload(String raw) async {
+  Future<void> _showInfo(String title, String message) {
+    return showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(title),
+        content: Text(message),
+        actions: [
+          TextButton(
+            child: const Text('确定'),
+            onPressed: () => Navigator.of(ctx).pop(),
+          ),
+        ],
+      ),
+    );
+  }
+
+  String _listName(int? listId) {
+    for (final list in _appState.lists) {
+      if (list.id == listId) return list.name;
+    }
+    return '';
+  }
+
+  Future<void> _processQrPayload(
+    String raw,
+    int targetListId,
+    String targetListName,
+  ) async {
     String csv;
     try {
       csv = decodeQrPayload(raw);
     } catch (e) {
       if (mounted) {
-        showDialog(
-          context: context,
-          builder: (ctx) => AlertDialog(
-            title: Text('解码失败'),
-            content: Text('无法解析二维码内容，请确认二维码来源正确。\n\n$e'),
-            actions: [
-              TextButton(
-                child: Text('确定'),
-                onPressed: () => Navigator.of(ctx).pop(),
-              ),
-            ],
-          ),
+        _showInfo('解码失败', '无法解析二维码内容，请确认二维码来源正确。\n\n$e');
+      }
+      return;
+    }
+
+    await _runImport(csv, targetListId, targetListName);
+  }
+
+  Future<void> _runImport(
+    String csv,
+    int targetListId,
+    String targetListName,
+  ) async {
+    final messenger = ScaffoldMessenger.of(context);
+    setState(() => _transferBusy = true);
+    String? error;
+    var imported = 0;
+    try {
+      imported = await _importCsv(csv, targetListId);
+    } catch (e) {
+      error = e is FormatException ? e.message : '导入失败，请重试';
+    } finally {
+      if (mounted) setState(() => _transferBusy = false);
+    }
+    if (!mounted) return;
+    if (error != null) {
+      await _showInfo('导入失败', error);
+      return;
+    }
+    _appState.studentsChanged(targetListId);
+    messenger.showSnackBar(
+      SnackBar(content: Text('已导入 $imported 名学生到「$targetListName」')),
+    );
+  }
+
+  Future<void> _importCsvDialog() async {
+    if (!_canTransfer) return;
+    final targetListId = _loadedListId;
+    final targetListName = _listName(targetListId);
+    if (targetListId == null) return;
+
+    FilePickerResult? result;
+    try {
+      result = await FilePicker.platform.pickFiles(
+        dialogTitle: "选择早期 NamePicker 版本的名单文件",
+        type: FileType.custom,
+        allowedExtensions: ['csv'],
+        withData: true,
+      );
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('文件读取失败')),
+        );
+      }
+      return;
+    }
+    if (result == null) return;
+
+    final file = result.files.single;
+    String content;
+    try {
+      if (file.bytes != null) {
+        content = utf8.decode(file.bytes!, allowMalformed: false);
+      } else if (file.path != null) {
+        content = utf8.decode(
+          await File(file.path!).readAsBytes(),
+          allowMalformed: false,
+        );
+      } else {
+        throw const FormatException('无法读取所选文件');
+      }
+    } on FormatException {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('仅支持 UTF-8 编码的 CSV')),
+        );
+      }
+      return;
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('文件读取失败')),
         );
       }
       return;
     }
 
-    final error = await _importCsv(csv);
-    if (error != null && mounted) {
-      showDialog(
-        context: context,
-        builder: (ctx) => AlertDialog(
-          title: Text('导入失败'),
-          content: Text(error),
-          actions: [
-            TextButton(
-              child: Text('确定'),
-              onPressed: () => Navigator.of(ctx).pop(),
-            ),
-          ],
-        ),
-      );
-    } else if (mounted) {
-      await _loadStudents();
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text('导入完成')));
-    }
+    await _runImport(content, targetListId, targetListName);
   }
 
-  Future<void> _importCsvDialog() async {
-    FilePickerResult? result = await FilePicker.platform.pickFiles(
-      dialogTitle: "选择早期 NamePicker 版本的名单文件",
-      type: FileType.custom,
-      allowedExtensions: ['csv'],
-    );
-    if (result != null && (kIsWeb || result.files.single.path != null)) {
-      String content;
-      if (kIsWeb) {
-        content = utf8.decode(result.files.single.bytes!);
-      } else {
-        final file = File(result.files.single.path!);
-        content = await file.readAsString();
-      }
-      final error = await _importCsv(content);
-      if (error != null) {
-        showDialog(
-          context: context,
-          builder: (ctx) => AlertDialog(
-            title: Text('导入失败'),
-            content: Text(error),
-            actions: [
-              TextButton(
-                child: Text('确定'),
-                onPressed: () => Navigator.of(ctx).pop(),
-              ),
-            ],
-          ),
-        );
-      } else {
-        await _loadStudents();
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('导入完成')));
-      }
-    }
-  }
-
-  Future<String?> _importCsv(String csvText) async {
-    if (currentListId == null) return '请先选择名单';
-    final lines = csvText.split(RegExp(r'\r?\n'));
-    if (lines.isEmpty || lines.length < 2) {
-      return '内容为空或没有数据行。';
-    }
-    final header = lines.first.trim().toLowerCase();
-    if (!(header.contains('name') &&
-        header.contains('sex') &&
-        header.contains('no'))) {
-      return '首行必须包含字段：name,sex,no';
-    }
-    for (var i = 1; i < lines.length; i++) {
-      final line = lines[i].trim();
-      if (line.isEmpty) continue;
-      final parts = line.split(',');
-      if (parts.length < 3) {
-        return '第${i + 1}行字段数量不足（应为3个，用英文逗号分隔）';
-      }
-      final name = parts[0].trim();
-      final sexRaw = parts[1].trim();
-      final no = parts[2].trim();
-      if (name.isEmpty || no.isEmpty) {
-        return '第${i + 1}行姓名或学号为空';
-      }
-      String gender = '男';
-      if (sexRaw == '1') gender = '女';
-      final student = Student(name: name, gender: gender, studentId: no);
-      await StudentDatabase.instance.create(student, currentListId!);
-    }
-    return null;
+  /// 先把整份 CSV 解析完，再一次性写入目标名单；返回写入条数。
+  Future<int> _importCsv(String csvText, int targetListId) async {
+    final parsed = studentsFromCsv(csvText);
+    return StudentDatabase.instance.createMany(parsed, targetListId);
   }
 
   @override
@@ -397,10 +553,9 @@ class _StudentEditorPageState extends State<StudentEditorPage> {
             child: PopupMenuButton<int>(
               tooltip: '选择/管理名单',
               initialValue: currentListId,
-              onSelected: (id) async {
-                currentListId = id;
-                await _loadStudents();
-                setState(() {});
+              onSelected: (id) {
+                // “新建名单”使用 -1 作为菜单动作，不能当作名单 ID 处理。
+                if (id >= 0) _appState.setCurrentListId(id);
               },
               itemBuilder: (context) => [
                 for (final l in lists)
@@ -424,40 +579,8 @@ class _StudentEditorPageState extends State<StudentEditorPage> {
                           tooltip: '重命名',
                           onPressed: () async {
                             Navigator.pop(context); // 关闭菜单
-                            final name = await showDialog<String>(
-                              context: context,
-                              builder: (ctx) {
-                                final controller = TextEditingController(
-                                  text: l.name,
-                                );
-                                return AlertDialog(
-                                  title: Text('重命名单'),
-                                  content: TextField(
-                                    controller: controller,
-                                    decoration: InputDecoration(
-                                      labelText: '名单名',
-                                    ),
-                                  ),
-                                  actions: [
-                                    TextButton(
-                                      onPressed: () => Navigator.pop(ctx),
-                                      child: Text('取消'),
-                                    ),
-                                    ElevatedButton(
-                                      onPressed: () =>
-                                          Navigator.pop(ctx, controller.text),
-                                      child: Text('保存'),
-                                    ),
-                                  ],
-                                );
-                              },
-                            );
-                            if (name != null && name.isNotEmpty) {
-                              await StudentDatabase.instance.updateList(
-                                ListGroup(id: l.id, name: name),
-                              );
-                              await _initLists(notifyGlobal: true);
-                            }
+                            if (!mounted) return;
+                            await _renameList(l);
                           },
                         ),
                         IconButton(
@@ -465,14 +588,8 @@ class _StudentEditorPageState extends State<StudentEditorPage> {
                           tooltip: '删除',
                           onPressed: () async {
                             Navigator.pop(context); // 关闭菜单
-                            if (lists.length == 1) {
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                SnackBar(content: Text('至少保留一个名单')),
-                              );
-                              return;
-                            }
-                            await StudentDatabase.instance.deleteList(l.id!);
-                            await _initLists(notifyGlobal: true);
+                            if (!mounted) return;
+                            await _deleteList(l);
                           },
                         ),
                       ],
@@ -489,42 +606,9 @@ class _StudentEditorPageState extends State<StudentEditorPage> {
                       Text('新建名单'),
                     ],
                   ),
-                  onTap: () async {
-                    final name = await showDialog<String>(
-                      context: context,
-                      builder: (ctx) {
-                        final controller = TextEditingController();
-                        return AlertDialog(
-                          title: Text('新建名单'),
-                          content: TextField(
-                            controller: controller,
-                            decoration: InputDecoration(labelText: '名单名'),
-                          ),
-                          actions: [
-                            TextButton(
-                              onPressed: () => Navigator.pop(ctx),
-                              child: Text('取消'),
-                            ),
-                            ElevatedButton(
-                              onPressed: () =>
-                                  Navigator.pop(ctx, controller.text),
-                              child: Text('创建'),
-                            ),
-                          ],
-                        );
-                      },
-                    );
-                    if (name != null && name.isNotEmpty) {
-                      final newId = await StudentDatabase.instance.createList(name);
-                      lists = await StudentDatabase.instance.readAllLists();
-                      currentListId = newId;
-                      await _loadStudents();
-                      setState(() {});
-                      if (mounted) {
-                        final appState = Provider.of<MyAppState>(context, listen: false);
-                        appState.notifyListeners();
-                      }
-                    }
+                  onTap: () {
+                    // onSelected 仍会收到 -1，已在上面忽略。
+                    _createList();
                   },
                 ),
               ],
@@ -557,32 +641,48 @@ class _StudentEditorPageState extends State<StudentEditorPage> {
         color: colorScheme.surfaceContainer,
         child: loading
             ? Center(child: CircularProgressIndicator())
-            : ListView.builder(
-                itemCount: students.length,
-                itemBuilder: (context, index) {
-                  final s = students[index];
-                  return ListTile(
-                    contentPadding: const EdgeInsets.symmetric(horizontal: 16),
-                    title: Text(s.name),
-                    subtitle: Text('学号: ${s.studentId} | 性别: ${s.gender}'),
-                    trailing: Row(
+            : _loadError != null
+                ? Center(
+                    child: Column(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        IconButton(
-                          visualDensity: VisualDensity.compact,
-                          icon: Icon(Icons.edit),
-                          onPressed: () => _addOrEditStudent(s),
-                        ),
-                        IconButton(
-                          visualDensity: VisualDensity.compact,
-                          icon: Icon(Icons.delete),
-                          onPressed: () => _deleteStudent(s),
+                        Text(_loadError!),
+                        const SizedBox(height: 12),
+                        FilledButton(
+                          onPressed: _loadStudents,
+                          child: const Text('重试'),
                         ),
                       ],
                     ),
-                  );
-                },
-              ),
+                  )
+                : ListView.builder(
+                    itemCount: students.length,
+                    itemBuilder: (context, index) {
+                      final s = students[index];
+                      return ListTile(
+                        contentPadding:
+                            const EdgeInsets.symmetric(horizontal: 16),
+                        title: Text(s.name),
+                        subtitle:
+                            Text('学号: ${s.studentId} | 性别: ${s.gender}'),
+                        trailing: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            IconButton(
+                              visualDensity: VisualDensity.compact,
+                              icon: Icon(Icons.edit),
+                              onPressed: () => _addOrEditStudent(s),
+                            ),
+                            IconButton(
+                              visualDensity: VisualDensity.compact,
+                              icon: Icon(Icons.delete),
+                              onPressed: () => _confirmDeleteStudent(s),
+                            ),
+                          ],
+                        ),
+                      );
+                    },
+                  ),
       ),
       floatingActionButton: FloatingActionButton(
         onPressed: () async {
@@ -624,6 +724,7 @@ class _StudentEditorPageState extends State<StudentEditorPage> {
               ),
             ),
           );
+          if (!mounted) return;
           if (selected == 'add') {
             _addOrEditStudent();
           } else if (selected == 'import') {
@@ -643,68 +744,251 @@ class _StudentEditorPageState extends State<StudentEditorPage> {
   }
 }
 
+/// 新建与重命名共用的名单名对话框，负责输入校验与保存状态。
+class ListNameDialog extends StatefulWidget {
+  final String title;
+  final String initialName;
+  final Future<void> Function(String name) onSave;
+
+  const ListNameDialog({
+    super.key,
+    required this.title,
+    required this.initialName,
+    required this.onSave,
+  });
+
+  @override
+  State<ListNameDialog> createState() => _ListNameDialogState();
+}
+
+class _ListNameDialogState extends State<ListNameDialog> {
+  late final TextEditingController _controller;
+  final _formKey = GlobalKey<FormState>();
+  bool _saving = false;
+  String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = TextEditingController(text: widget.initialName);
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  Future<void> _submit() async {
+    if (_saving) return;
+    if (!(_formKey.currentState?.validate() ?? false)) return;
+    final name = _controller.text.trim();
+    setState(() {
+      _saving = true;
+      _error = null;
+    });
+    try {
+      await widget.onSave(name);
+      if (!mounted) return;
+      Navigator.of(context).pop();
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        _saving = false;
+        _error = '保存失败，请重试';
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return PopScope(
+      canPop: !_saving,
+      child: AlertDialog(
+        title: Text(widget.title),
+        content: Form(
+          key: _formKey,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextFormField(
+                controller: _controller,
+                autofocus: true,
+                enabled: !_saving,
+                textInputAction: TextInputAction.done,
+                decoration: const InputDecoration(labelText: '名单名'),
+                onFieldSubmitted: (_) => _submit(),
+                validator: (value) =>
+                    (value ?? '').trim().isEmpty ? '请输入名单名' : null,
+              ),
+              if (_error != null) ...[
+                const SizedBox(height: 12),
+                Text(
+                  _error!,
+                  style: TextStyle(color: Theme.of(context).colorScheme.error),
+                ),
+              ],
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: _saving ? null : () => Navigator.of(context).pop(),
+            child: const Text('取消'),
+          ),
+          ElevatedButton(
+            onPressed: _saving ? null : _submit,
+            child: _saving
+                ? const SizedBox(
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : const Text('保存'),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class StudentDialog extends StatefulWidget {
   final Student? student;
-  const StudentDialog({Key? key, this.student}) : super(key: key);
+  final Future<void> Function(Student student) onSave;
+
+  const StudentDialog({super.key, this.student, required this.onSave});
 
   @override
   State<StudentDialog> createState() => _StudentDialogState();
 }
 
 class _StudentDialogState extends State<StudentDialog> {
-  late TextEditingController nameController;
-  late TextEditingController idController;
-  String gender = '男';
+  late final TextEditingController _nameController;
+  late final TextEditingController _idController;
+  final _formKey = GlobalKey<FormState>();
+  String _gender = '男';
+  bool _saving = false;
+  String? _error;
 
   @override
   void initState() {
     super.initState();
-    nameController = TextEditingController(text: widget.student?.name ?? '');
-    idController = TextEditingController(text: widget.student?.studentId ?? '');
-    gender = widget.student?.gender ?? '男';
+    _nameController = TextEditingController(text: widget.student?.name ?? '');
+    _idController = TextEditingController(
+      text: widget.student?.studentId ?? '',
+    );
+    _gender = widget.student?.gender ?? '男';
+  }
+
+  @override
+  void dispose() {
+    _nameController.dispose();
+    _idController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _submit() async {
+    if (_saving) return;
+    if (!(_formKey.currentState?.validate() ?? false)) return;
+    setState(() {
+      _saving = true;
+      _error = null;
+    });
+    final student = Student(
+      id: widget.student?.id,
+      name: _nameController.text.trim(),
+      gender: _gender,
+      studentId: _idController.text.trim(),
+      listId: widget.student?.listId,
+    );
+    try {
+      await widget.onSave(student);
+      if (!mounted) return;
+      Navigator.of(context).pop();
+    } catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _saving = false;
+        _error = error is StudentMissingException
+            ? error.message
+            : '保存失败，请重试';
+      });
+    }
   }
 
   @override
   Widget build(BuildContext context) {
-    return AlertDialog(
-      title: Text(widget.student == null ? '添加学生' : '编辑学生'),
-      content: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          TextField(
-            controller: nameController,
-            decoration: InputDecoration(labelText: '姓名'),
+    return PopScope(
+      canPop: !_saving,
+      child: AlertDialog(
+        title: Text(widget.student == null ? '添加学生' : '编辑学生'),
+        content: Form(
+          key: _formKey,
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                TextFormField(
+                  controller: _nameController,
+                  autofocus: true,
+                  enabled: !_saving,
+                  textInputAction: TextInputAction.next,
+                  decoration: const InputDecoration(labelText: '姓名'),
+                  validator: (value) =>
+                      (value ?? '').trim().isEmpty ? '请输入姓名' : null,
+                ),
+                TextFormField(
+                  controller: _idController,
+                  enabled: !_saving,
+                  textInputAction: TextInputAction.done,
+                  decoration: const InputDecoration(labelText: '学号'),
+                  onFieldSubmitted: (_) => _submit(),
+                  validator: (value) =>
+                      (value ?? '').trim().isEmpty ? '请输入学号' : null,
+                ),
+                const SizedBox(height: 16),
+                DropdownButtonFormField<String>(
+                  key: ValueKey('student-gender-$_gender'),
+                  initialValue: _gender,
+                  decoration: const InputDecoration(labelText: '性别'),
+                  items: const [
+                    DropdownMenuItem(value: '男', child: Text('男')),
+                    DropdownMenuItem(value: '女', child: Text('女')),
+                  ],
+                  onChanged: _saving
+                      ? null
+                      : (value) {
+                          if (value != null) setState(() => _gender = value);
+                        },
+                ),
+                if (_error != null) ...[
+                  const SizedBox(height: 12),
+                  Text(
+                    _error!,
+                    style: TextStyle(color: Theme.of(context).colorScheme.error),
+                  ),
+                ],
+              ],
+            ),
           ),
-          TextField(
-            controller: idController,
-            decoration: InputDecoration(labelText: '学号'),
+        ),
+        actions: [
+          TextButton(
+            onPressed: _saving ? null : () => Navigator.of(context).pop(),
+            child: const Text('取消'),
           ),
-          DropdownButton<String>(
-            value: gender,
-            items: [
-              '男',
-              '女',
-            ].map((g) => DropdownMenuItem(value: g, child: Text(g))).toList(),
-            onChanged: (v) => setState(() => gender = v!),
+          ElevatedButton(
+            onPressed: _saving ? null : _submit,
+            child: _saving
+                ? const SizedBox(
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : const Text('保存'),
           ),
         ],
       ),
-      actions: [
-        TextButton(onPressed: () => Navigator.pop(context), child: Text('取消')),
-        ElevatedButton(
-          onPressed: () {
-            final s = Student(
-              id: widget.student?.id,
-              name: nameController.text,
-              gender: gender,
-              studentId: idController.text,
-              listId: widget.student?.listId,
-            );
-            Navigator.pop(context, s);
-          },
-          child: Text('保存'),
-        ),
-      ],
     );
   }
 }

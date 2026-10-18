@@ -1,10 +1,9 @@
 import 'dart:convert';
 import 'dart:io';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
-
-const _chunkSize = 800;
 
 String encodeQrPayload(String csvData) {
   final original = utf8.encode(csvData);
@@ -46,22 +45,83 @@ String decodeQrPayload(String data) {
   return utf8.decode(decompressed);
 }
 
-List<String> _splitIntoChunks(String payload) {
-  if (payload.length <= _chunkSize) return [payload];
+/// 单张二维码的负载上限（字符数）。
+const int qrChunkSize = 800;
+
+/// 分片总数上限，避免历史数据的内存分配失控。
+const int qrMaxChunks = 1024;
+
+/// 把负载切成 [qrChunkSize] 大小的分片，附加 `|i/total` 后缀。
+List<String> splitQrPayload(String payload) {
+  if (payload.length <= qrChunkSize) return [payload];
+  final total = (payload.length / qrChunkSize).ceil();
+  if (total > qrMaxChunks) {
+    throw const FormatException('名单过大，请使用 CSV 文件传输');
+  }
   final chunks = <String>[];
-  final total = (payload.length / _chunkSize).ceil();
   for (var i = 0; i < total; i++) {
-    final start = i * _chunkSize;
-    final end = (start + _chunkSize).clamp(0, payload.length);
+    final start = i * qrChunkSize;
+    final end = (start + qrChunkSize).clamp(0, payload.length);
     chunks.add('${payload.substring(start, end)}|${i + 1}/$total');
   }
   return chunks;
 }
 
-Future<void> showQrExportDialog(BuildContext context, String csvData) {
+/// 已经校验过的分片信息。
+class QrChunkRef {
   final String payload;
+  final int index;
+  final int total;
+
+  const QrChunkRef({
+    required this.payload,
+    required this.index,
+    required this.total,
+  });
+}
+
+final RegExp _chunkSuffix = RegExp(r'\|(\d+)/(\d+)$');
+
+/// 解析分片二维码；没有分片后缀返回 null，非法分片抛 [FormatException]。
+QrChunkRef? parseQrChunk(String raw) {
+  final match = _chunkSuffix.firstMatch(raw);
+  if (match == null) return null;
+  final index = int.tryParse(match.group(1)!);
+  final total = int.tryParse(match.group(2)!);
+  if (index == null || total == null) {
+    throw const FormatException('二维码分片序号无法解析');
+  }
+  if (total < 1 || total > qrMaxChunks) {
+    throw const FormatException('二维码分片总数超出范围');
+  }
+  if (index < 1 || index > total) {
+    throw const FormatException('二维码分片序号超出范围');
+  }
+  final payload = raw.substring(0, match.start);
+  if (payload.isEmpty) {
+    throw const FormatException('二维码内容为空');
+  }
+  return QrChunkRef(payload: payload, index: index, total: total);
+}
+
+Future<void> showQrExportDialog(BuildContext context, String csvData) {
+  final List<String> chunks;
   try {
-    payload = encodeQrPayload(csvData);
+    chunks = splitQrPayload(encodeQrPayload(csvData));
+  } on FormatException catch (e) {
+    return showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text('无法生成二维码'),
+        content: Text(e.message),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: Text('确定'),
+          ),
+        ],
+      ),
+    );
   } catch (e) {
     return showDialog(
       context: context,
@@ -78,7 +138,6 @@ Future<void> showQrExportDialog(BuildContext context, String csvData) {
     );
   }
 
-  final chunks = _splitIntoChunks(payload);
   if (chunks.length == 1) {
     return _showSingleQrDialog(context, chunks.first, csvData);
   }
@@ -259,7 +318,28 @@ class _MultiQrDialogState extends State<_MultiQrDialog> {
   }
 }
 
+/// mobile_scanner 6.0.11 只声明 Android/iOS/macOS/Web 实现。
+bool get qrScannerSupported {
+  if (kIsWeb) return true;
+  return Platform.isAndroid || Platform.isIOS || Platform.isMacOS;
+}
+
 Future<String?> showQrScanner(BuildContext context, {String? title}) {
+  if (!qrScannerSupported) {
+    return showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('无法扫码'),
+        content: const Text('不支持扫码，请使用 CSV 导入'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: const Text('确定'),
+          ),
+        ],
+      ),
+    );
+  }
   return Navigator.of(context).push<String>(
     MaterialPageRoute(
       builder: (ctx) => _QrScannerPage(title: title),
@@ -291,6 +371,17 @@ class _QrScannerPageState extends State<_QrScannerPage> {
     super.dispose();
   }
 
+  Future<void> _retry() async {
+    final controller = _controller;
+    if (controller == null) return;
+    try {
+      await controller.stop();
+      await controller.start();
+    } catch (_) {
+      // 保持可关闭的错误态，用户可以关闭后重新进入。
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -303,6 +394,48 @@ class _QrScannerPageState extends State<_QrScannerPage> {
       ),
       body: MobileScanner(
         controller: _controller,
+        placeholderBuilder: (context, child) => const Center(
+          child: CircularProgressIndicator(),
+        ),
+        errorBuilder: (context, error, child) {
+          final isPermission =
+              error.errorCode == MobileScannerErrorCode.permissionDenied;
+          final isUnsupported =
+              error.errorCode == MobileScannerErrorCode.unsupported;
+          final message = isPermission
+              ? '相机权限未开启，请在系统设置中允许访问'
+              : isUnsupported
+                  ? '未检测到可用相机'
+                  : '无法启动相机，请重试';
+          return Center(
+            child: Padding(
+              padding: const EdgeInsets.all(24),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(message, textAlign: TextAlign.center),
+                  const SizedBox(height: 16),
+                  Wrap(
+                    spacing: 12,
+                    runSpacing: 12,
+                    alignment: WrapAlignment.center,
+                    children: [
+                      if (!isPermission && !isUnsupported)
+                        FilledButton(
+                          onPressed: _retry,
+                          child: const Text('重试'),
+                        ),
+                      TextButton(
+                        onPressed: () => Navigator.of(context).maybePop(),
+                        child: const Text('关闭'),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          );
+        },
         onDetect: (capture) {
           if (_hasScanned) return;
           final barcode = capture.barcodes.firstOrNull;

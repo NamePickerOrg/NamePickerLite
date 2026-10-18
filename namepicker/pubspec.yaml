@@ -26,6 +26,7 @@ dependencies:
   share_plus: any
   flutter_svg: ^2.0.10+1
   qr_flutter: ^4.1.0
+  csv: ^6.0.0
   mobile_scanner: ^6.0.0
 
 dev_dependencies:
