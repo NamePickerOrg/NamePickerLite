@@ -1,0 +1,258 @@
+name: Build Windows 7 engine
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/build-win7-engine.yml'
+      - '.gitattributes'
+      - 'namepicker/scripts/apply_win7_engine_patches.ps1'
+      - 'namepicker/scripts/win7-engine-patches/**'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: win7-engine-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  FLUTTER_VERSION: '3.47.7'
+  FLUTTER_REV: 'abaf9c523780a608bd46686fd5e53740a07077f8'
+  ENGINE_ROOT: 'C:\w\flutter'
+  DEPOT_TOOLS_PATH: 'C:\w\depot_tools'
+  DEPOT_TOOLS_WIN_TOOLCHAIN: '0'
+  GIT_TERMINAL_PROMPT: '0'
+  PYTHONIOENCODING: 'utf-8'
+
+jobs:
+  build_win7_engine:
+    runs-on: windows-latest
+    timeout-minutes: 350
+    defaults:
+      run:
+        shell: pwsh
+
+    steps:
+      - name: Checkout application
+        uses: actions/checkout@v4
+
+      - name: Report and free disk space
+        run: |
+          Get-PSDrive -PSProvider FileSystem | Select-Object Name, Used, Free
+          $targets = @(
+            'C:\Android',
+            'C:\Program Files\Google',
+            'C:\Program Files\Go',
+            'C:\Program Files\R',
+            'C:\Program Files\dotnet',
+            'C:\Program Files (x86)\Microsoft SQL Server',
+            'C:\Program Files\Microsoft SQL Server'
+          )
+          $targets += (Get-Item 'C:\Program Files\Microsoft\jdk-*' -ErrorAction SilentlyContinue).FullName
+          $targets += (Get-ChildItem 'C:\Program Files' -Directory -ErrorAction SilentlyContinue |
+            Where-Object { $_.Name -like 'Julia-*' } | ForEach-Object FullName)
+          foreach ($target in $targets) {
+            if ($target -and (Test-Path $target)) {
+              Write-Host "Removing $target"
+              Remove-Item $target -Recurse -Force -ErrorAction SilentlyContinue
+            }
+          }
+          Get-PSDrive -PSProvider FileSystem | Select-Object Name, Used, Free
+
+      - name: Configure Git and long paths
+        run: |
+          Set-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\FileSystem' -Name 'LongPathsEnabled' -Value 1 -Force
+          git config --global core.longpaths true
+          git config --global core.autocrlf false
+          git config --global core.symlinks true
+
+      - name: Configure MSVC environment
+        run: |
+          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          $vs = (& $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath).Trim()
+          if (-not $vs) { throw 'Visual Studio with the C++ toolchain was not found.' }
+          "GYP_MSVS_OVERRIDE_PATH=$vs" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          "WINDOWSSDKDIR=${env:ProgramFiles(x86)}\Windows Kits\10" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          Write-Host "Visual Studio: $vs"
+
+      - name: Install depot_tools
+        run: |
+          New-Item -ItemType Directory -Path 'C:\w' -Force | Out-Null
+          git clone --depth 1 https://chromium.googlesource.com/chromium/tools/depot_tools.git $env:DEPOT_TOOLS_PATH
+          if ($LASTEXITCODE -ne 0) { throw 'Failed to clone depot_tools' }
+          $env:DEPOT_TOOLS_PATH | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
+
+      - name: Checkout Flutter at the pinned revision
+        run: |
+          $root = $env:ENGINE_ROOT
+          New-Item -ItemType Directory -Path $root -Force | Out-Null
+          if (-not (Test-Path (Join-Path $root '.git'))) {
+            git -C $root init
+            git -C $root remote add origin https://github.com/flutter/flutter.git
+          }
+          git -C $root fetch --depth 1 origin "refs/tags/$env:FLUTTER_VERSION"
+          if ($LASTEXITCODE -ne 0) {
+            git -C $root fetch --depth 1 origin $env:FLUTTER_REV
+          }
+          git -C $root checkout --detach FETCH_HEAD
+          if (-not (Test-Path (Join-Path $root 'engine\src\flutter'))) { throw 'engine/src/flutter is missing' }
+          $head = (git -C $root rev-parse HEAD).Trim()
+          if ($head -ne $env:FLUTTER_REV) {
+            git -C $root fetch --depth 1 origin $env:FLUTTER_REV
+            git -C $root checkout --detach FETCH_HEAD
+            $head = (git -C $root rev-parse HEAD).Trim()
+          }
+          if ($head -ne $env:FLUTTER_REV) { throw "Flutter is at $head, expected $env:FLUTTER_REV" }
+          Write-Host "Flutter revision: $head"
+
+      - name: Configure gclient
+        run: |
+          $gclient = @'
+          solutions = [
+            {
+              "custom_deps": {},
+              "deps_file": "DEPS",
+              "managed": False,
+              "name": ".",
+              "safesync_url": "",
+              "url": "https://github.com/flutter/flutter.git",
+              "custom_vars": {
+                "download_android_deps": False,
+                "download_jdk": False,
+              },
+            },
+          ]
+          '@
+          Set-Content -Path (Join-Path $env:ENGINE_ROOT '.gclient') -Value $gclient -Encoding utf8NoBOM
+
+      - name: Sync engine dependencies
+        run: |
+          $env:PATH = "$env:DEPOT_TOOLS_PATH;$env:PATH"
+          Set-Location $env:ENGINE_ROOT
+          for ($attempt = 1; $attempt -le 2; $attempt++) {
+            cmd /c "gclient sync --no-history > C:\w\gclient.log 2>&1"
+            if ($LASTEXITCODE -eq 0) { break }
+            Write-Host "gclient sync failed (attempt $attempt)"
+            if ($attempt -eq 2) {
+              Get-Content C:\w\gclient.log -Tail 120
+              throw 'gclient sync failed'
+            }
+            Start-Sleep -Seconds 30
+          }
+          Get-Content C:\w\gclient.log -Tail 40
+
+      - name: Apply Windows 7 patches to Dart
+        run: |
+          $dart = Join-Path $env:ENGINE_ROOT 'engine\src\flutter\third_party\dart'
+          if (-not (Test-Path (Join-Path $dart 'runtime\bin\platform_win.cc'))) {
+            throw 'Dart sources were not synced'
+          }
+          git -C $dart rev-parse HEAD
+          & "$env:GITHUB_WORKSPACE\namepicker\scripts\apply_win7_engine_patches.ps1" -DartDir $dart
+
+      - name: Generate GN build files
+        run: |
+          $env:PATH = "$env:DEPOT_TOOLS_PATH;$env:PATH"
+          Set-Location "$env:ENGINE_ROOT\engine\src"
+          python .\flutter\tools\gn --runtime-mode=release --no-lto --no-goma
+          if ($LASTEXITCODE -ne 0) { throw 'gn gen failed' }
+
+      - name: Build Windows engine
+        run: |
+          $env:PATH = "$env:DEPOT_TOOLS_PATH;$env:PATH"
+          Set-Location "$env:ENGINE_ROOT\engine\src"
+          autoninja -C out\host_release windows gen_snapshot dart_sdk flutter/build/archives:flutter_patched_sdk flutter/build/archives:windows_flutter
+          if ($LASTEXITCODE -ne 0) { throw 'Engine build failed' }
+          $out = (Resolve-Path 'out\host_release').Path
+          $patched = Join-Path $out 'flutter_patched_sdk'
+          $product = Join-Path $out 'flutter_patched_sdk_product'
+          if ((Test-Path $patched) -and -not (Test-Path $product)) {
+            New-Item -ItemType Junction -Path $product -Target $patched | Out-Null
+          }
+
+      - name: Verify Windows 7 compatible imports
+        run: |
+          $out = (Resolve-Path "$env:ENGINE_ROOT\engine\src\out\host_release").Path
+          $msvc = Get-ChildItem (Join-Path $env:GYP_MSVS_OVERRIDE_PATH 'VC\Tools\MSVC') -Directory |
+            Sort-Object Name -Descending | Select-Object -First 1
+          $dumpbin = Join-Path $msvc.FullName 'bin\Hostx64\x64\dumpbin.exe'
+          if (-not (Test-Path $dumpbin)) { throw "dumpbin not found at $dumpbin" }
+          $pattern = 'GetHostNameW|PathAllocCanonicalize|PathCchCanonicalizeEx|PathCchCombineEx|PathCchRemoveFileSpec|RtlAddGrowableFunctionTable|RtlDeleteGrowableFunctionTable'
+          $failed = $false
+          $logDir = Join-Path $env:GITHUB_WORKSPACE 'win7-artifacts\imports'
+          New-Item -ItemType Directory -Path $logDir -Force | Out-Null
+          foreach ($name in @('flutter_windows.dll', 'gen_snapshot.exe')) {
+            $file = Join-Path $out $name
+            if (-not (Test-Path $file)) { throw "Missing $file" }
+            $imports = & $dumpbin /nologo /imports $file
+            $imports | Set-Content (Join-Path $logDir "$name.imports.txt")
+            $hits = $imports | Select-String -Pattern $pattern
+            if ($hits) {
+              $hits | ForEach-Object { Write-Host $_ }
+              $failed = $true
+            }
+          }
+          if ($failed) { throw 'Windows 8+ API imports remain' }
+          Write-Host 'No patched Windows 8+ API imports found.'
+
+      - name: Build application with local engine
+        run: |
+          $env:PATH = "$env:ENGINE_ROOT\bin;$env:PATH"
+          Set-Location "$env:GITHUB_WORKSPACE\namepicker"
+          & "$env:ENGINE_ROOT\bin\flutter.bat" config --no-analytics
+          & "$env:ENGINE_ROOT\bin\flutter.bat" pub get
+          if ($LASTEXITCODE -ne 0) { throw 'flutter pub get failed' }
+          & "$env:ENGINE_ROOT\bin\flutter.bat" build windows --release --local-engine=host_release --local-engine-host=host_release --local-engine-src-path="$env:ENGINE_ROOT\engine\src"
+          if ($LASTEXITCODE -ne 0) { throw 'flutter build windows failed' }
+
+      - name: Verify application imports
+        run: |
+          $release = (Resolve-Path "$env:GITHUB_WORKSPACE\namepicker\build\windows\x64\runner\Release").Path
+          $msvc = Get-ChildItem (Join-Path $env:GYP_MSVS_OVERRIDE_PATH 'VC\Tools\MSVC') -Directory |
+            Sort-Object Name -Descending | Select-Object -First 1
+          $dumpbin = Join-Path $msvc.FullName 'bin\Hostx64\x64\dumpbin.exe'
+          $pattern = 'GetHostNameW|PathAllocCanonicalize|PathCchCanonicalizeEx|PathCchCombineEx|PathCchRemoveFileSpec|RtlAddGrowableFunctionTable|RtlDeleteGrowableFunctionTable'
+          $failed = $false
+          $logDir = Join-Path $env:GITHUB_WORKSPACE 'win7-artifacts\imports'
+          New-Item -ItemType Directory -Path $logDir -Force | Out-Null
+          foreach ($name in @('namepicker.exe', 'flutter_windows.dll')) {
+            $file = Join-Path $release $name
+            if (-not (Test-Path $file)) { throw "Missing $file" }
+            $imports = & $dumpbin /nologo /imports $file
+            $imports | Set-Content (Join-Path $logDir "app-$name.imports.txt")
+            $hits = $imports | Select-String -Pattern $pattern
+            if ($hits) {
+              $hits | ForEach-Object { Write-Host $_ }
+              $failed = $true
+            }
+          }
+          if ($failed) { throw 'Windows 8+ API imports remain in the application bundle' }
+          Write-Host 'Application bundle imports are Windows 7 compatible.'
+
+      - name: Collect artifacts
+        if: always()
+        run: |
+          $art = Join-Path $env:GITHUB_WORKSPACE 'win7-artifacts'
+          New-Item -ItemType Directory -Path $art -Force | Out-Null
+          $out = "$env:ENGINE_ROOT\engine\src\out\host_release"
+          foreach ($file in @('flutter_windows.dll', 'gen_snapshot.exe')) {
+            Copy-Item (Join-Path $out $file) $art -ErrorAction SilentlyContinue
+          }
+          Copy-Item (Join-Path $out 'zip_archives\windows-x64-release\windows-x64-flutter.zip') $art -ErrorAction SilentlyContinue
+          Copy-Item 'C:\w\gclient.log' $art -ErrorAction SilentlyContinue
+          $release = Join-Path $env:GITHUB_WORKSPACE 'namepicker\build\windows\x64\runner\Release'
+          if (Test-Path $release) {
+            Compress-Archive -Path (Join-Path $release '*') -DestinationPath (Join-Path $art 'NamePicker-Windows7-x64.zip') -Force
+          }
+
+      - name: Upload artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: NamePicker-Windows7-x64
+          path: |
+            win7-artifacts/**
+            namepicker/build/windows/x64/runner/Release/**
+          if-no-files-found: warn
+          retention-days: 7
