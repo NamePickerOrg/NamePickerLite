@@ -45,7 +45,6 @@ jobs:
             'C:\Program Files\Google',
             'C:\Program Files\Go',
             'C:\Program Files\R',
-            'C:\Program Files\dotnet',
             'C:\Program Files (x86)\Microsoft SQL Server',
             'C:\Program Files\Microsoft SQL Server'
           )
@@ -55,7 +54,7 @@ jobs:
           foreach ($target in $targets) {
             if ($target -and (Test-Path $target)) {
               Write-Host "Removing $target"
-              Remove-Item $target -Recurse -Force -ErrorAction SilentlyContinue
+              cmd /c "rd /s /q `"$target`" 2>nul"
             }
           }
           Get-PSDrive -PSProvider FileSystem | Select-Object Name, Used, Free
@@ -198,10 +197,14 @@ jobs:
           $failed = $false
           $logDir = Join-Path $env:GITHUB_WORKSPACE 'win7-artifacts\imports'
           New-Item -ItemType Directory -Path $logDir -Force | Out-Null
-          foreach ($name in @('flutter_windows.dll', 'gen_snapshot.exe')) {
-            $file = Join-Path $out $name
-            if (-not (Test-Path $file)) { throw "Missing $file" }
+          $files = @(Join-Path $out 'flutter_windows.dll')
+          $files += Get-ChildItem $out -Recurse -Filter 'gen_snapshot.exe' |
+            Select-Object -ExpandProperty FullName
+          if (-not (Test-Path $files[0])) { throw "Missing $($files[0])" }
+          if ($files.Count -lt 2) { throw 'gen_snapshot.exe not found' }
+          foreach ($file in $files) {
             $imports = & $dumpbin /nologo /imports $file
+            $name = $file.Substring($out.Length).TrimStart('\').Replace('\', '_')
             $imports | Set-Content (Join-Path $logDir "$name.imports.txt")
             $hits = $imports | Select-String -Pattern $pattern
             if ($hits) {
@@ -252,9 +255,10 @@ jobs:
           $art = Join-Path $env:GITHUB_WORKSPACE 'win7-artifacts'
           New-Item -ItemType Directory -Path $art -Force | Out-Null
           $out = "$env:ENGINE_ROOT\engine\src\out\host_release"
-          foreach ($file in @('flutter_windows.dll', 'gen_snapshot.exe')) {
-            Copy-Item (Join-Path $out $file) $art -ErrorAction SilentlyContinue
-          }
+          Copy-Item (Join-Path $out 'flutter_windows.dll') $art -ErrorAction SilentlyContinue
+          $genSnapshot = Get-ChildItem $out -Recurse -Filter 'gen_snapshot.exe' -ErrorAction SilentlyContinue |
+            Select-Object -First 1
+          if ($genSnapshot) { Copy-Item $genSnapshot.FullName (Join-Path $art 'gen_snapshot.exe') }
           Copy-Item (Join-Path $out 'zip_archives\windows-x64-release\windows-x64-flutter.zip') $art -ErrorAction SilentlyContinue
           Copy-Item 'C:\w\gclient.log' $art -ErrorAction SilentlyContinue
           $release = Join-Path $env:GITHUB_WORKSPACE 'namepicker\build\windows\x64\runner\Release'
