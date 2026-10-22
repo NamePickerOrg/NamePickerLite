@@ -151,6 +151,22 @@ jobs:
           git -C $dart rev-parse HEAD
           & "$env:GITHUB_WORKSPACE\namepicker\scripts\apply_win7_engine_patches.ps1" -DartDir $dart
 
+      - name: Use the installed Windows SDK
+        run: |
+          $setup = Join-Path $env:ENGINE_ROOT 'engine\src\build\toolchain\win\setup_toolchain.py'
+          if (-not (Test-Path $setup)) { throw "Missing $setup" }
+          $sdk = Get-ChildItem 'C:\Program Files (x86)\Windows Kits\10\Include' -Directory |
+            Where-Object { $_.Name -match '^10\.\d+\.\d+\.\d+$' } |
+            Sort-Object { [version]$_.Name } -Descending |
+            Select-Object -First 1
+          if (-not $sdk) { throw 'No Windows SDK found' }
+          $content = Get-Content $setup -Raw
+          $updated = $content -replace "SDK_VERSION = '10\.0\.\d+\.0'", "SDK_VERSION = '$($sdk.Name)'"
+          if ($updated -eq $content) { throw 'SDK_VERSION not found in setup_toolchain.py' }
+          Set-Content -Path $setup -Value $updated -Encoding utf8NoBOM
+          Select-String -Path $setup -Pattern '^SDK_VERSION'
+          Write-Host "Using Windows SDK $($sdk.Name)"
+
       - name: Generate GN build files
         run: |
           $env:PATH = "$env:DEPOT_TOOLS_PATH;$env:PATH"
